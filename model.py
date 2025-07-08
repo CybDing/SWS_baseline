@@ -21,6 +21,12 @@ elif MODEL == 'MOBILENETV2':
                 include_top=False,
                 weights='imagenet'
             )
+elif MODEL == "INCEPTIONV3":
+    base_model = tf.keras.applications.InceptionV3(
+                input_shape=(*IMG_SIZE, 3),
+                include_top=False,
+                weights='imagenet'
+            ) 
 else: raise ValueError("MODEL NAME PARSING ERROR!")
 
 base_model.trainable = False
@@ -38,4 +44,4 @@ predictions = layers.Dense(CLASS_NUM, activation='softmax')(x)
 
 model = models.Model(inputs = base_model.input, outputs = predictions)
 
-optim = RMSprop()
+optim = Adam()

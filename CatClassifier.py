@@ -14,16 +14,206 @@ import matplotlib.pyplot as plt
 from model import model, optim
 from tensorflow.keras import layers, models
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+import cv2
 from sklearn.metrics import classification_report, confusion_matrix
 import seaborn as sns
 from config import *
 
-class CatClassifier:
-    def __init__(self, data_dir, img_size=(224, 224), batch_size=32):
+def perspective_transform(image):
+    """
+    使用OpenCV实现透视变换数据增强
+    专门为 Keras ImageDataGenerator 设计
+    输入: numpy数组 (0-255, uint8)
+    输出: numpy数组 (0-255, float32) - 适合后续的 rescale 处理
+    """
+    # 确保输入是numpy数组
+    if hasattr(image, 'shape'):
+        img = image.copy()
+    else:
+        img = np.array(image)
+    
+    # 确保数据类型为uint8进行处理
+    if img.dtype != np.uint8:
+        if img.max() <= 1.0:
+            # 如果是0-1范围，转换为0-255
+            img = (img * 255).astype(np.uint8)
+        else:
+            img = img.astype(np.uint8)
+    
+    h, w = img.shape[:2]
+    
+    # 随机决定是否应用透视变换 (50%概率)
+    if np.random.random() < 0.5:
+        # 定义透视变换的强度
+        perspective_strength = 0.1
+        
+        # 原始四个角点
+        src_points = np.float32([
+            [0, 0],
+            [w, 0], 
+            [w, h],
+            [0, h]
+        ])
+        
+        # 随机偏移目标点
+        max_offset_x = w * perspective_strength
+        max_offset_y = h * perspective_strength
+        
+        dst_points = np.float32([
+            [np.random.uniform(-max_offset_x, max_offset_x), 
+             np.random.uniform(-max_offset_y, max_offset_y)],
+            [w + np.random.uniform(-max_offset_x, max_offset_x), 
+             np.random.uniform(-max_offset_y, max_offset_y)],
+            [w + np.random.uniform(-max_offset_x, max_offset_x), 
+             h + np.random.uniform(-max_offset_y, max_offset_y)],
+            [np.random.uniform(-max_offset_x, max_offset_x), 
+             h + np.random.uniform(-max_offset_y, max_offset_y)]
+        ])
+        
+        # 计算透视变换矩阵
+        try:
+            matrix = cv2.getPerspectiveTransform(src_points, dst_points)
+            # 应用透视变换
+            img = cv2.warpPerspective(img, matrix, (w, h), 
+                                    borderMode=cv2.BORDER_CONSTANT, 
+                                    borderValue=(255, 255, 255))
+        except:
+            # 如果变换失败，返回原图
+            pass
+    
+    # 转换为float32类型，以便后续的rescale操作
+    return img.astype(np.float32)
 
+def advanced_perspective_transform(image):
+    """
+    更高级的透视变换，包含多种变换类型
+    专门为 Keras ImageDataGenerator 设计
+    输入: numpy数组 (0-255, uint8)
+    输出: numpy数组 (0-255, float32) - 适合后续的 rescale 处理
+    """
+    if hasattr(image, 'shape'):
+        img = image.copy()
+    else:
+        img = np.array(image)
+    
+    # 确保数据类型为uint8
+    if img.dtype != np.uint8:
+        if img.max() <= 1.0:
+            # 如果是0-1范围，转换为0-255
+            img = (img * 255).astype(np.uint8)
+        else:
+            img = img.astype(np.uint8)
+    
+    h, w = img.shape[:2]
+    
+    # 随机选择变换类型
+    transform_type = np.random.choice(['perspective', 'trapezoid', 'skew', 'none'], 
+                                    p=[0.3, 0.2, 0.2, 0.3])
+    
+    if transform_type == 'none':
+        return img.astype(np.float32)
+    
+    src_points = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
+    
+    if transform_type == 'perspective':
+        # 随机透视变换
+        offset = min(w, h) * 0.15
+        dst_points = np.float32([
+            [np.random.uniform(-offset, offset), np.random.uniform(-offset, offset)],
+            [w + np.random.uniform(-offset, offset), np.random.uniform(-offset, offset)],
+            [w + np.random.uniform(-offset, offset), h + np.random.uniform(-offset, offset)],
+            [np.random.uniform(-offset, offset), h + np.random.uniform(-offset, offset)]
+        ])
+    
+    elif transform_type == 'trapezoid':
+        # 梯形变换
+        offset = min(w, h) * 0.1
+        dst_points = np.float32([
+            [offset, 0],
+            [w - offset, 0],
+            [w, h],
+            [0, h]
+        ])
+    
+    elif transform_type == 'skew':
+        # 倾斜变换
+        skew_x = np.random.uniform(-0.2, 0.2) * w
+        skew_y = np.random.uniform(-0.2, 0.2) * h
+        dst_points = np.float32([
+            [skew_x, skew_y],
+            [w + skew_x, skew_y],
+            [w, h],
+            [0, h]
+        ])
+    
+    try:
+        matrix = cv2.getPerspectiveTransform(src_points, dst_points)
+        img = cv2.warpPerspective(img, matrix, (w, h), 
+                                borderMode=cv2.BORDER_CONSTANT, 
+                                borderValue=(255, 255, 255))
+    except:
+        pass
+    
+    return img.astype(np.float32)
+
+def test_perspective_transform(image_path, save_path=None):
+    """
+    测试透视变换效果，生成对比图
+    
+    Args:
+        image_path: 测试图片路径
+        save_path: 保存路径（可选）
+    """
+    import cv2
+    import matplotlib.pyplot as plt
+    
+    # 读取图片
+    img = cv2.imread(image_path)
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
+    # 应用不同的透视变换
+    simple_transform = perspective_transform(img_rgb)
+    advanced_transform = advanced_perspective_transform(img_rgb)
+    
+    # 创建对比图
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    
+    axes[0].imshow(img_rgb)
+    axes[0].set_title('Original Image')
+    axes[0].axis('off')
+    
+    axes[1].imshow(simple_transform/255.0)
+    axes[1].set_title('Simple Perspective Transform')
+    axes[1].axis('off')
+    
+    axes[2].imshow(advanced_transform/255.0)
+    axes[2].set_title('Advanced Perspective Transform')
+    axes[2].axis('off')
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Comparison saved to: {save_path}")
+    
+    plt.show()
+
+class CatClassifier:
+
+    def __init__(self, data_dir, img_size=(224, 224), batch_size=32, perspective_type='advanced'):
+        """
+        初始化猫分类器
+        
+        Args:
+            data_dir: 数据目录
+            img_size: 图像尺寸
+            batch_size: 批量大小
+            perspective_type: 透视变换类型 ('simple', 'advanced', 'none')
+        """
         self.data_dir = data_dir
         self.img_size = img_size
         self.batch_size = batch_size
+        self.perspective_type = perspective_type
         self.model = None
         self.history = None
 
@@ -37,21 +227,33 @@ class CatClassifier:
         print(f"List of categories: {self.class_names}")
         print(f"Total {len(self.class_names)} categories")
 
-        self.train_gen = ImageDataGenerator(    
-                rescale = 1/255.0,   
-                rotation_range=20,        
-                shear_range=0.1,          
-                zoom_range=0.1,           
-                horizontal_flip=True,     
-                fill_mode='nearest',      
-                width_shift_range=0.2,   
-                height_shift_range=0.1, 
-                # preprocessing_function = custom_preprocessing
-                
-            )
-            
-        self.val_gen = ImageDataGenerator(rescale=1./255)
-    
+        # 选择透视变换函数
+        if perspective_type == 'simple':
+            preprocessing_func = perspective_transform
+        elif perspective_type == 'advanced':
+            preprocessing_func = advanced_perspective_transform
+        else:
+            preprocessing_func = None
+
+        # 训练集
+        self.train_gen = tf.keras.preprocessing.image.ImageDataGenerator(
+            rotation_range=10,
+            shear_range=0.1,
+            zoom_range=0.15,
+            horizontal_flip=True,
+            fill_mode='constant',
+            width_shift_range=0.1,
+            height_shift_range=0.1,
+            cval=255,
+            preprocessing_function=preprocessing_func,  # 使用自定义透视变换
+            rescale=1/255.0,  # 将 rescale 放在最后
+        )
+
+        # 验证集（一般不做增强，只归一化）
+        self.val_gen = tf.keras.preprocessing.image.ImageDataGenerator(
+            rescale=1./255
+        )
+
     def create_datasets(self):
 
         # def custom_preprocessing(img):
@@ -300,4 +502,3 @@ class CatClassifier:
         print(f"Mapping: {dict(enumerate(self.class_mapping))}")
         
         return self.model
-    

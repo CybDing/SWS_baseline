@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>小车轨迹实时显示 (精确控制版)</title>
+<style>
+  #canvas {
+    border: 1px solid black;
+    background-color: #fafafa;
+  }
+</style>
+</head>
+<body>
+<h2>🚗 小车轨迹 (精确控制版)</h2>
+<p>画布将自动缩放。运动逻辑：转向时无位移，直行时无转向。</p>
+<canvas id="canvas" width="800" height="600"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+// --- 配置选项 ---
+const autoScale = true;
+const fixedScale = 5;
+const padding = 50;
+
+// --- 轨迹数据 ---
+const trajectory = [{ x: 0, y: 0, theta: 0 }]; // 增加theta初始值
+let bounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+
+// --- 小车状态 ---
+let lastTime = null;
+let lastEncoderLeft = null, lastEncoderRight = null;
+
+
+function redrawCanvas() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  let scale;
+  if (autoScale) {
+    const trajWidth = bounds.maxX - bounds.minX;
+    const trajHeight = bounds.maxY - bounds.minY;
+    const scaleX = (canvas.width - padding * 2) / trajWidth;
+    const scaleY = (canvas.height - padding * 2) / trajHeight;
+    scale = Math.min(scaleX, scaleY);
+    if (!isFinite(scale)) {
+        scale = fixedScale;
+    }
+  } else {
+    scale = fixedScale;
+  }
+
+  const trajCenterX = (bounds.minX + bounds.maxX) / 2;
+  const trajCenterY = (bounds.minY + bounds.maxY) / 2;
+  const offsetX = (canvas.width / 2) - (trajCenterX * scale);
+  const offsetY = (canvas.height / 2) + (trajCenterY * scale);
+
+  ctx.beginPath();
+  ctx.strokeStyle = "blue";
+  ctx.lineWidth = 2;
+
+  trajectory.forEach((point, index) => {
+    const canvasX = point.x * scale + offsetX;
+    const canvasY = canvas.height - (point.y * scale + (offsetY - canvas.height));
+
+    if (index === 0) {
+      ctx.moveTo(canvasX, canvasY);
+    } else {
+      ctx.lineTo(canvasX, canvasY);
+    }
+  });
+  ctx.stroke();
+}
+
+
+function updateState(data) {
+  // 确保关键数据存在
+  if (data.timestamp === undefined || data.encoder_left === undefined || data.encoder_right === undefined || data.command === undefined) {
+    return;
+  }
+
+  const timestamp = new Date(data.timestamp).getTime();
+  if (lastTime === null) {
+    lastTime = timestamp;
+    lastEncoderLeft = data.encoder_left;
+    lastEncoderRight = data.encoder_right;
+    return;
+  }
+
+  const dt = (timestamp - lastTime) / 1000.0;
+  lastTime = timestamp;
+
+  if (dt <= 0) return;
+
+  const deltaEncoderL = data.encoder_left - lastEncoderLeft;
+  const deltaEncoderR = data.encoder_right - lastEncoderRight;
+  lastEncoderLeft = data.encoder_left;
+  lastEncoderRight = data.encoder_right;
+  
+  const lastPoint = trajectory[trajectory.length - 1];
+  const currentTheta = lastPoint.theta || 0;
+
+  // --- 核心逻辑：根据指令决定速度和角速度 ---
+  let v = 0;     // 默认线速度为 0
+  let omega = 0; // 默认角速度为 0
+
+  if (data.command === 'L' || data.command === 'R') {
+    // 转向指令 (L/R): 只改变角度，不产生位移
+    omega = (data.command === 'L' ? data.angular_velocity : -data.angular_velocity) || 0;
+    // v 保持为 0
+
+  } else if (data.command === 'F' || data.command === 'B') {
+    // 直行/后退指令 (F/B): 只产生位移，不改变角度
+    const deltaDistance = (deltaEncoderL + deltaEncoderR) / 2.0;
+    v = deltaDistance / dt;
+    // omega 保持为 0
+  
+  }
+  // 对于停止指令 'S', v 和 omega 都将保持为 0，小车完全静止。
+
+  // --- 根据上面计算出的 v 和 omega 更新状态 ---
+  const newTheta = currentTheta + (omega * dt);
+  
+  // 使用平均角度提高位移计算的精度
+  const avgTheta = (currentTheta + newTheta) / 2;
+  const newX = lastPoint.x + (v * Math.cos(avgTheta) * dt);
+  const newY = lastPoint.y + (v * Math.sin(avgTheta) * dt);
+  // --- 逻辑结束 ---
+
+  trajectory.push({ x: newX, y: newY, theta: newTheta });
+  
+  bounds.minX = Math.min(bounds.minX, newX);
+  bounds.maxX = Math.max(bounds.maxX, newX);
+  bounds.minY = Math.min(bounds.minY, newY);
+  bounds.maxY = Math.max(bounds.maxY, newY);
+
+  redrawCanvas();
+}
+
+
+// --- MQTT 连接部分 ---
+const client = new Paho.Client("localhost", 9001, "clientId-" + Math.random());
+
+client.onConnectionLost = function (responseObject) {
+  console.error("🔌 连接丢失:", responseObject.errorMessage);
+};
+
+client.onMessageArrived = function (message) {
+  try {
+    const data = JSON.parse(message.payloadString);
+    updateState(data);
+  } catch (e) {
+    console.error("❌ 解析JSON数据出错:", e);
+  }
+};
+
+client.connect({
+  userName: "main",
+  password: "sws3009-20",
+  onSuccess: () => {
+    console.log(`✅ 已成功连接到 MQTT Broker! 开始订阅 'robot/data' 主题。`);
+    client.subscribe("robot/data");
+  },
+  onFailure: err => {
+    console.error("❌ 连接失败:", err);
+  }
+});
+
+// 初始绘制
+redrawCanvas();
+</script>
+</body>
+</html>

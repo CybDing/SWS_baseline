@@ -62,7 +62,7 @@ def main(model_name):
 
     _ = classifier.train(save_path=save_path, continued=continued)
     classifier.plot_training_history()
-    classifier.evaluate()
+    classifier.evaluate(model_name=model_name, evl_dir=os.path.join(DATA_DIR, '../mdata_new'))
 
 if __name__ == "__main__":
     main(model_name='./Model/CatClassifierV3')

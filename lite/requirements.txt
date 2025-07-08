@@ -1,4 +1,0 @@
-numpy<2.0
-Pillow>=9.5.0
-tflite-runtime>=2.13.0
-datatime==5.5

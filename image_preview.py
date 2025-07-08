@@ -14,7 +14,7 @@ def preview_augmented_images():
         img_size = IMG_SIZE,
         batch_size=9  #
     )
-    train_gen, _ = classifier.create_data_generators()
+    train_gen, _ = classifier.create_datasets()
     images, _ = next(train_gen) 
     plt.figure(figsize=(8, 6))
     for i in range(9):

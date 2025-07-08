@@ -1,0 +1,5 @@
+# 树莓派端依赖包
+paho-mqtt==1.6.1
+pyserial==3.5
+opencv-python==4.8.0.74
+numpy==1.24.3

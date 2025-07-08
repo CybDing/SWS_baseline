@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>树莓派小车远程控制</title>
+    <!-- 引入MQTT WebSocket库 -->
+    <script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .video-section {
+            background: #000;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            height: 300px;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #1a1a1a;
+        }
+
+        #videoStream {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .status-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+
+        .controls-section {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .control-group {
+            margin-bottom: 25px;
+        }
+
+        .control-group h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .direction-controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 10px;
+            max-width: 200px;
+            margin: 0 auto;
+        }
+
+        .control-btn {
+            background: linear-gradient(145deg, #667eea, #764ba2);
+            border: none;
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .control-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .control-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .control-btn.active {
+            background: linear-gradient(145deg, #f093fb, #f5576c);
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(240, 147, 251, 0.8);
+            animation: pulse 0.6s ease-in-out infinite alternate;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 20px rgba(240, 147, 251, 0.8);
+            }
+            100% {
+                box-shadow: 0 0 30px rgba(240, 147, 251, 1);
+            }
+        }
+
+        .up-btn { grid-column: 2; grid-row: 1; }
+        .left-btn { grid-column: 1; grid-row: 2; }
+        .stop-btn { grid-column: 2; grid-row: 2; background: linear-gradient(145deg, #ff6b6b, #ee5a24); }
+        .right-btn { grid-column: 3; grid-row: 2; }
+        .down-btn { grid-column: 2; grid-row: 3; }
+
+        .photo-btn {
+            background: linear-gradient(145deg, #48c9b0, #16a085);
+            border: none;
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            width: 100%;
+        }
+
+        .photo-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .sensor-data {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .sensor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .sensor-item {
+            background: linear-gradient(145deg, #f8f9fa, #e9ecef);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            border-left: 4px solid #667eea;
+        }
+
+        .sensor-item h4 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .sensor-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .connection-status {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #dc3545;
+        }
+
+        .status-dot.connected {
+            background: #28a745;
+        }
+
+        .instructions {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 20px;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .instructions h4 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .key-hint {
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+            color: #495057;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .container {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚗 树莓派小车远程控制</h1>
+        
+        <div class="connection-status">
+            <div class="status-item">
+                <div class="status-dot" id="mqttStatus"></div>
+                <span>MQTT连接</span>
+            </div>
+            <div class="status-item">
+                <div class="status-dot" id="streamStatus"></div>
+                <span>视频流</span>
+            </div>
+            <div class="status-item">
+                <div class="status-dot" id="robotStatus"></div>
+                <span>小车状态</span>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="video-section">
+                <h3 style="color: white; margin-bottom: 15px;">📹 实时视频流</h3>
+                <div class="video-container">
+                    <img id="videoStream" src="http://192.168.148.103:8080/?action=stream" alt="视频流">
+                    <div class="status-overlay" id="videoStatus">连接中...</div>
+                </div>
+            </div>
+
+            <div class="controls-section">
+                <div class="control-group">
+                    <h3>🎮 方向控制</h3>
+                    <div class="direction-controls">
+                        <button class="control-btn up-btn" data-command="F">↑</button>
+                        <button class="control-btn left-btn" data-command="L">←</button>
+                        <button class="control-btn stop-btn" data-command="S">STOP</button>
+                        <button class="control-btn right-btn" data-command="R">→</button>
+                        <button class="control-btn down-btn" data-command="B">↓</button>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <h3>📸 拍照功能</h3>
+                    <button class="photo-btn" id="photoBtn">拍照</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="sensor-data">
+            <h3 style="margin-bottom: 15px;">📊 传感器数据</h3>
+            <div class="sensor-grid">
+                <div class="sensor-item">
+                    <h4>前方距离</h4>
+                    <div class="sensor-value" id="distanceFront">-- cm</div>
+                </div>
+                <div class="sensor-item">
+                    <h4>左侧距离</h4>
+                    <div class="sensor-value" id="distanceLeft">-- cm</div>
+                </div>
+                <div class="sensor-item">
+                    <h4>右侧距离</h4>
+                    <div class="sensor-value" id="distanceRight">-- cm</div>
+                </div>
+                <div class="sensor-item">
+                    <h4>角加速度</h4>
+                    <div class="sensor-value" id="angularAccel">-- deg/s²</div>
+                </div>
+                <div class="sensor-item">
+                    <h4>左轮编码器</h4>
+                    <div class="sensor-value" id="encoderLeft">--</div>
+                </div>
+                <div class="sensor-item">
+                    <h4>右轮编码器</h4>
+                    <div class="sensor-value" id="encoderRight">--</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <h4>📝 使用说明</h4>
+            <p>
+                • 键盘控制：<span class="key-hint">W</span> 前进、<span class="key-hint">S</span> 后退、<span class="key-hint">A</span> 左转、<span class="key-hint">D</span> 右转、<span class="key-hint">X</span> 拍照<br>
+                • 鼠标控制：点击按钮进行控制<br>
+                • 自动安全：前方距离小于20cm时自动停止<br>
+                • 实时数据：传感器数据每100ms更新一次
+            </p>
+        </div>
+    </div>
+
+    <script>
+        const USE_MQTT = false;  // 设置为true使用MQTT，false使用本地HTTP测试
+        const MQTT_BROKER = "localhost";  // 使用本地MQTT服务器
+        const MQTT_PORT = 9001;  //w * change from 9001 to 1883
+        // const MQTT_USERNAME = 'monitor1'
+        // const MQTT_PASSWORD = 'sws3009-200'
+        
+        const MQTT_TOPIC_COMMAND = "robot/command";
+        const MQTT_TOPIC_DATA = "robot/data";
+        const MQTT_TOPIC_PHOTO = "robot/photo";
+        const MQTT_TOPIC_PHOTO_RESULT = "robot/photo_result";
+
+        let mqttClient = null;
+        let currentCommand = 'S';
+        let keyPressed = {};
+        let commandHistory = [];
+        let commandInterval = null;
+        let isCommandActive = false;
+        const COMMAND_FREQUENCY = 50; // 50ms间隔，20Hz频率
+        const DATA_FREQUENCY = 100;   // 100ms间隔，10Hz频率
+
+        // 初始化MQTT
+        function initMQTT() {
+            if (!USE_MQTT) {
+                console.log("使用本地HTTP模式, 跳过MQTT初始化");
+                updateStatus('mqttStatus', true);
+                updateStatus('robotStatus', true);
+                showCommandFeedback('🌐 本地HTTP模式已启用', 'info');
+                return;
+            }
+            
+            try {
+                mqttClient = new Paho.MQTT.Client(MQTT_BROKER, MQTT_PORT, "web_client_" + Date.now());
+                mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+                mqttClient.onConnectionLost = onConnectionLost;
+                mqttClient.onMessageArrived = onMessageArrived;
+                
+                mqttClient.connect({
+                    onSuccess: onConnect,
+                    onFailure: onConnectFailure,
+                    useSSL: false
+                });
+            } catch (error) {
+                console.error("MQTT初始化失败:", error);
+                updateStatus('mqttStatus', false);
+            }
+        }
+
+        function onConnect() {
+            console.log("MQTT连接成功");
+            updateStatus('mqttStatus', true);
+            
+            mqttClient.subscribe(MQTT_TOPIC_DATA);
+            mqttClient.subscribe(MQTT_TOPIC_PHOTO_RESULT);
+        }
+
+        function onConnectFailure(error) {
+            console.log("MQTT连接失败:", error);
+            updateStatus('mqttStatus', false);
+        }
+
+        function onConnectionLost(responseObject) {
+            if (responseObject.errorCode !== 0) {
+                console.log("MQTT连接丢失:", responseObject.errorMessage);
+                updateStatus('mqttStatus', false);
+            }
+        }
+
+        function onMessageArrived(message) {
+            const topic = message.destinationName;
+            const payload = message.payloadString;
+            
+            if (topic === MQTT_TOPIC_DATA) {
+                try {
+                    const data = JSON.parse(payload);
+                    updateSensorData(data);
+                } catch (error) {
+                    console.error("解析传感器数据失败:", error);
+                }
+            } else if (topic === MQTT_TOPIC_PHOTO_RESULT) {
+                try {
+                    const result = JSON.parse(payload);
+                    handlePhotoResult(result);
+                } catch (error) {
+                    console.error("解析拍照结果失败:", error);
+                }
+            }
+        }
+
+        function sendCommand(command) {
+            console.log(`发送命令: ${command}`);
+            
+            if (USE_MQTT && mqttClient && mqttClient.isConnected()) {
+                // MQTT模式
+                const message = new Paho.MQTT.Message(command);
+                message.destinationName = MQTT_TOPIC_COMMAND;
+                mqttClient.send(message);
+            } else {
+                // HTTP模式 - 发送到本地服务器
+                fetch('/command', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ command: command })
+                }).then(response => response.json())
+                .then(data => {
+                    // 只在控制台记录，不显示UI反馈，减少干扰
+                    console.log('命令发送成功:', data);
+                })
+                .catch(error => {
+                    console.error('命令发送失败:', error);
+                });
+            }
+            
+            currentCommand = command;
+            updateButtonStates();
+            addCommandToHistory(command);
+        }
+
+        function startContinuousCommand(command) {
+            if (isCommandActive && currentCommand === command) {
+                return; // 已经在发送相同命令
+            }
+            
+            stopContinuousCommand();
+            isCommandActive = true;
+            currentCommand = command;
+            
+            showCommandFeedback(`🎮 开始连续发送: ${getCommandName(command)}`);
+            
+            sendCommand(command);
+            
+            commandInterval = setInterval(() => {
+                if (isCommandActive) {
+                    sendCommand(command);
+                }
+            }, COMMAND_FREQUENCY);
+        }
+
+        function stopContinuousCommand() {
+            if (commandInterval) {
+                clearInterval(commandInterval);
+                commandInterval = null;
+            }
+            
+            if (isCommandActive) {
+                showCommandFeedback(`⏹️ Stop continual controlling!`, 'info');
+                isCommandActive = false;
+                sendCommand('S'); 
+                updateButtonStates();
+            }
+        }
+
+        function takePhoto() {
+            console.log("Photo request sent!");
+            
+            if (USE_MQTT && mqttClient && mqttClient.isConnected()) {
+                const message = new Paho.MQTT.Message("take");
+                message.destinationName = MQTT_TOPIC_PHOTO;
+                mqttClient.send(message);
+            } else {
+                // HTTP模式 - 发送到本地服务器
+                fetch('/photo', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ action: 'take' })
+                }).then(response => response.json())
+                .then(data => {
+                    console.log('拍照响应:', data);
+                    handlePhotoResult(data);
+                })
+                .catch(error => {
+                    console.error('拍照失败:', error);
+                    handlePhotoResult({status: 'error', message: '网络错误'});
+                });
+            }
+            
+            showPhotoFeedback();
+        }
+
+        function showPhotoFeedback() {
+            const feedback = document.createElement('div');
+            feedback.textContent = '📸 拍照中...';
+            feedback.style.cssText = `
+                position: fixed;
+                top: 80px;
+                right: 20px;
+                background: #48c9b0;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+                z-index: 1000;
+                font-size: 16px;
+                font-weight: bold;
+                animation: fadeInOut 2s ease-in-out;
+            `;
+            document.body.appendChild(feedback);
+            
+            setTimeout(() => {
+                if (feedback.parentNode) {
+                    feedback.parentNode.removeChild(feedback);
+                }
+            }, 2000);
+        }
+
+        function addCommandToHistory(command) {
+            const timestamp = new Date().toLocaleTimeString();
+            commandHistory.push({command, timestamp});
+            
+            if (commandHistory.length > 10) {
+                commandHistory.shift();
+            }
+            
+            if (command !== 'S') {
+                console.log(`[${timestamp}] 命令: ${command}`);
+            }
+        }
+
+        function updateSensorData(data) {
+            // 检查数据结构，支持两种格式
+            let sensorData, connectedDevices;
+            
+            if (data.sensor_data) {
+                // Mac客户端返回的格式
+                sensorData = data.sensor_data;
+                connectedDevices = data.connected_devices;
+            } else {
+                // 直接传感器数据格式
+                sensorData = data;
+                connectedDevices = null;
+            }
+            
+            if (sensorData.distance_front !== undefined) {
+                document.getElementById('distanceFront').textContent = sensorData.distance_front + ' cm';
+            }
+            if (sensorData.distance_left !== undefined) {
+                document.getElementById('distanceLeft').textContent = sensorData.distance_left + ' cm';
+            }
+            if (sensorData.distance_right !== undefined) {
+                document.getElementById('distanceRight').textContent = sensorData.distance_right + ' cm';
+            }
+            if (sensorData.angular_acceleration !== undefined) {
+                document.getElementById('angularAccel').textContent = sensorData.angular_acceleration.toFixed(2) + ' deg/s²';
+            }
+            if (sensorData.encoder_left !== undefined) {
+                document.getElementById('encoderLeft').textContent = sensorData.encoder_left;
+            }
+            if (sensorData.encoder_right !== undefined) {
+                document.getElementById('encoderRight').textContent = sensorData.encoder_right;
+            }
+            
+            if (connectedDevices) {
+                updateStatus('robotStatus', connectedDevices.raspberry_pi);
+                updateStatus('mqttStatus', connectedDevices.raspberry_pi); // MQTT状态基于树莓派连接状态
+            } else {
+                updateStatus('robotStatus', true);
+            }
+        }
+
+        function handlePhotoResult(result) {
+            if (result.status === 'success') {
+                // 简化拍照成功反馈
+                showPhotoSuccessFeedback(result.filename);
+                console.log('拍照成功:', result);
+            } else {
+                // 简化拍照失败反馈
+                showPhotoErrorFeedback(result.message);
+                console.log('拍照失败:', result);
+            }
+        }
+
+        function showPhotoSuccessFeedback(filename) {
+            const feedback = document.createElement('div');
+            feedback.textContent = `📸 拍照成功: ${filename}`;
+            feedback.style.cssText = `
+                position: fixed;
+                top: 80px;
+                right: 20px;
+                background: #28a745;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+                z-index: 1000;
+                font-size: 14px;
+                font-weight: bold;
+                max-width: 300px;
+                word-wrap: break-word;
+            `;
+            document.body.appendChild(feedback);
+            
+            setTimeout(() => {
+                if (feedback.parentNode) {
+                    feedback.parentNode.removeChild(feedback);
+                }
+            }, 3000);
+        }
+
+        function showPhotoErrorFeedback(message) {
+            const feedback = document.createElement('div');
+            feedback.textContent = `❌ 拍照失败: ${message}`;
+            feedback.style.cssText = `
+                position: fixed;
+                top: 80px;
+                right: 20px;
+                background: #dc3545;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+                z-index: 1000;
+                font-size: 14px;
+                font-weight: bold;
+                max-width: 300px;
+                word-wrap: break-word;
+            `;
+            document.body.appendChild(feedback);
+            
+            setTimeout(() => {
+                if (feedback.parentNode) {
+                    feedback.parentNode.removeChild(feedback);
+                }
+            }, 3000);
+        }
+
+        function updateStatus(elementId, connected) {
+            const element = document.getElementById(elementId);
+            if (connected) {
+                element.classList.add('connected');
+            } else {
+                element.classList.remove('connected');
+            }
+        }
+
+        function updateButtonStates() {
+            document.querySelectorAll('.control-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            if (currentCommand !== 'S') {
+                const activeBtn = document.querySelector(`[data-command="${currentCommand}"]`);
+                if (activeBtn) {
+                    activeBtn.classList.add('active');
+                }
+            }
+        }
+
+        function showKeyFeedback(key) {
+            const feedback = document.createElement('div');
+            feedback.textContent = `按键: ${key.toUpperCase()}`;
+            feedback.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: rgba(0, 0, 0, 0.8);
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+                z-index: 1000;
+                font-size: 16px;
+                font-weight: bold;
+            `;
+            document.body.appendChild(feedback);
+            
+            setTimeout(() => {
+                document.body.removeChild(feedback);
+            }, 1000);
+        }
+
+        function getCommandName(command) {
+            const commandNames = {
+                'F': '前进',
+                'B': '后退',
+                'L': '左转',
+                'R': '右转',
+                'S': '停止'
+            };
+            return commandNames[command] || command;
+        }
+
+        function showCommandFeedback(message, type = 'success') {
+            const feedback = document.createElement('div');
+            feedback.textContent = message;
+            
+            const colors = {
+                'success': '#28a745',
+                'info': '#17a2b8',
+                'warning': '#ffc107',
+                'error': '#dc3545'
+            };
+            
+            feedback.style.cssText = `
+                position: fixed;
+                top: 120px;
+                right: 20px;
+                background: ${colors[type] || colors.success};
+                color: white;
+                padding: 8px 16px;
+                border-radius: 5px;
+                z-index: 1000;
+                font-size: 14px;
+                font-weight: bold;
+                max-width: 300px;
+                word-wrap: break-word;
+                animation: slideIn 0.3s ease-out;
+            `;
+            
+            document.body.appendChild(feedback);
+            
+            setTimeout(() => {
+                if (feedback.parentNode) {
+                    feedback.style.animation = 'slideOut 0.3s ease-in';
+                    setTimeout(() => {
+                        if (feedback.parentNode) {
+                            feedback.parentNode.removeChild(feedback);
+                        }
+                    }, 300);
+                }
+            }, 1500);
+        }
+
+        // 添加滑入滑出动画
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideIn {
+                from {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
+                to {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+            }
+            
+            @keyframes slideOut {
+                from {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+                to {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // 键盘事件处理
+        document.addEventListener('keydown', (e) => {
+            if (keyPressed[e.key]) return;
+            keyPressed[e.key] = true;
+            
+            let command = null;
+            switch (e.key.toLowerCase()) {
+                case 'w':
+                    command = 'F';
+                    break;
+                case 's':
+                    command = 'B';
+                    break;
+                case 'a':
+                    command = 'L';
+                    break;
+                case 'd':
+                    command = 'R';
+                    break;
+                case 'x':
+                    takePhoto();
+                    showKeyFeedback('X');
+                    return;
+            }
+            
+            if (command) {
+                startContinuousCommand(command);
+                showKeyFeedback(e.key);
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            keyPressed[e.key] = false;
+            
+            if (['w', 's', 'a', 'd'].includes(e.key.toLowerCase())) {
+                stopContinuousCommand();
+                showKeyFeedback('STOP');
+            }
+        });
+
+        // 鼠标事件处理
+        document.querySelectorAll('.control-btn').forEach(btn => {
+            btn.addEventListener('mousedown', (e) => {
+                const command = e.target.dataset.command;
+                if (command && command !== 'S') {
+                    startContinuousCommand(command);
+                } else {
+                    stopContinuousCommand();
+                }
+            });
+            
+            btn.addEventListener('mouseup', (e) => {
+                const command = e.target.dataset.command;
+                if (command !== 'S') {
+                    stopContinuousCommand();
+                }
+            });
+            
+            btn.addEventListener('mouseleave', (e) => {
+                const command = e.target.dataset.command;
+                if (command !== 'S') {
+                    stopContinuousCommand();
+                }
+            });
+
+            // 触摸事件支持
+            btn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const command = e.target.dataset.command;
+                if (command && command !== 'S') {
+                    startContinuousCommand(command);
+                } else {
+                    stopContinuousCommand();
+                }
+            });
+            
+            btn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                const command = e.target.dataset.command;
+                if (command !== 'S') {
+                    stopContinuousCommand();
+                }
+            });
+        });
+
+        document.getElementById('photoBtn').addEventListener('click', takePhoto);
+
+        // 视频流处理
+        const videoStream = document.getElementById('videoStream');
+        const videoStatus = document.getElementById('videoStatus');
+        
+        videoStream.onload = () => {
+            videoStatus.textContent = '视频流正常';
+            updateStatus('streamStatus', true);
+        };
+        
+        videoStream.onerror = () => {
+            videoStatus.textContent = '视频流断开';
+            updateStatus('streamStatus', false);
+        };
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            initMQTT();
+            
+            videoStream.src = `http://192.168.148.103:8080/?action=stream`;
+            
+            if (!USE_MQTT) {
+                startDataPolling();
+            }
+        });
+
+        // 本地模式下的数据轮询
+        function startDataPolling() {
+            setInterval(() => {
+                fetch('/data')
+                    .then(response => response.json())
+                    .then(data => {
+                        updateSensorData(data);
+                    })
+                    .catch(error => {
+                        console.error('获取传感器数据失败:', error);
+                        updateStatus('robotStatus', false);
+                    });
+            }, DATA_FREQUENCY);
+        }
+
+        // 防止页面刷新时的键盘事件
+        window.addEventListener('beforeunload', () => {
+            stopContinuousCommand();
+        });
+    </script>
+</body>
+</html>

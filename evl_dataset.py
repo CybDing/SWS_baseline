@@ -10,7 +10,7 @@ import os
 if __name__ == '__main__':
 
     data_dir = DATA_DIR
-    model_name = './Model/CatClassifier_512V3_9.h5' 
+    model_name = 'model/CatClassifierV3_14.h5' 
     model_path = os.path.join(BASE_DIR, model_name) 
 
     classifier = CatClassifier(
@@ -19,5 +19,6 @@ if __name__ == '__main__':
             batch_size=BATCH_SIZE 
     )
     classifier.load_model(model_path)
+    print(classifier.model.layers)
     classifier.create_datasets()
-    classifier.evaluate(model_name=model_name, evl_dir=os.path.join(DATA_DIR, 'train')) # using standard dataset
+    classifier.evaluate(model_name=model_name, evl_dir=os.path.join(DATA_DIR, '../dataset3+2')) # using standard dataset

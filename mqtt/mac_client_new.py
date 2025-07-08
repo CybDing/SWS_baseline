@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+本地HTTP服务器 - 转发MQTT数据到网页
+"""
+
+import json
+import time
+import threading
+import webbrowser
+import os
+from datetime import datetime
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+import paho.mqtt.client as mqtt
+
+# 配置
+HTTP_PORT = 8000
+MQTT_BROKER = "localhost"  # 树莓派的IP地址
+MQTT_PORT = 1883
+MQTT_USERNAME = 'rasp'
+MQTT_PASSWORD = 'sws3009-20-20'
+
+# MQTT主题
+MQTT_TOPIC_COMMAND = "robot/command"
+MQTT_TOPIC_DATA = "robot/data"
+MQTT_TOPIC_PHOTO = "robot/photo"
+MQTT_TOPIC_PHOTO_RESULT = "robot/photo_result"
+MQTT_TOPIC_PREDICTION = "robot/prediction"
+
+# 全局数据存储
+class DataStore:
+    def __init__(self):
+        self.sensor_data = {
+            'distance_front': 0,
+            'distance_left': 0,
+            'distance_right': 0,
+            'angular_acceleration': 0,
+            'encoder_left': 0,
+            'encoder_right': 0,
+            'timestamp': datetime.now().isoformat(),
+            'status': 'disconnected'
+        }
+        self.photo_result = None
+        self.prediction_result = None
+        self.prediction_history = []
+        self.mqtt_connected = False
+        self.last_prediction_time = 0
+        self.lock = threading.Lock()
+
+data_store = DataStore()
+mqtt_client = None
+
+class HTTPHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        """处理GET请求"""
+        parsed_path = urlparse(self.path)
+        
+        # 设置CORS头
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+        
+        if parsed_path.path == '/data':
+            # 返回传感器数据
+            with data_store.lock:
+                response_data = {
+                    'sensor_data': data_store.sensor_data,
+                    'connected_devices': {
+                        'raspberry_pi': data_store.mqtt_connected,
+                        'mqtt_server': data_store.mqtt_connected
+                    }
+                }
+            self.wfile.write(json.dumps(response_data).encode('utf-8'))
+        
+        elif parsed_path.path == '/prediction':
+            # 返回最新预测结果
+            with data_store.lock:
+                if data_store.prediction_result:
+                    response_data = {
+                        'status': 'success',
+                        'prediction': data_store.prediction_result,
+                        'timestamp': data_store.last_prediction_time
+                    }
+                else:
+                    response_data = {
+                        'status': 'no_prediction',
+                        'message': 'No prediction available'
+                    }
+            self.wfile.write(json.dumps(response_data).encode('utf-8'))
+        
+        elif parsed_path.path == '/prediction_history':
+            # 返回预测历史
+            with data_store.lock:
+                response_data = {
+                    'status': 'success',
+                    'history': data_store.prediction_history,
+                    'count': len(data_store.prediction_history)
+                }
+            self.wfile.write(json.dumps(response_data).encode('utf-8'))
+        
+        elif parsed_path.path == '/status':
+            # 返回连接状态
+            response_data = {
+                'mqtt_connected': data_store.mqtt_connected,
+                'server_time': datetime.now().isoformat(),
+                'has_prediction': data_store.prediction_result is not None
+            }
+            self.wfile.write(json.dumps(response_data).encode('utf-8'))
+        
+        else:
+            # 404
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b'{"error": "Not found"}')
+
+    def do_POST(self):
+        """处理POST请求"""
+        parsed_path = urlparse(self.path)
+        
+        # 设置CORS头
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+        
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            request_data = json.loads(post_data.decode('utf-8'))
+            
+            if parsed_path.path == '/command':
+                # 转发命令到MQTT
+                command = request_data.get('command', 'S')
+                if mqtt_client and mqtt_client.is_connected():
+                    mqtt_client.publish(MQTT_TOPIC_COMMAND, command)
+                    response = {'status': 'success', 'command': command}
+                else:
+                    response = {'status': 'error', 'message': 'MQTT not connected'}
+                
+                self.wfile.write(json.dumps(response).encode('utf-8'))
+            
+            elif parsed_path.path == '/photo':
+                # 转发拍照命令到MQTT
+                action = request_data.get('action', 'take')
+                if mqtt_client and mqtt_client.is_connected():
+                    mqtt_client.publish(MQTT_TOPIC_PHOTO, action)
+                    # 等待拍照结果
+                    result = wait_for_photo_result()
+                    if result:
+                        self.wfile.write(json.dumps(result).encode('utf-8'))
+                    else:
+                        response = {'status': 'timeout', 'message': 'Photo timeout'}
+                        self.wfile.write(json.dumps(response).encode('utf-8'))
+                else:
+                    response = {'status': 'error', 'message': 'MQTT not connected'}
+                    self.wfile.write(json.dumps(response).encode('utf-8'))
+            
+            else:
+                response = {'status': 'error', 'message': 'Unknown endpoint'}
+                self.wfile.write(json.dumps(response).encode('utf-8'))
+                
+        except Exception as e:
+            response = {'status': 'error', 'message': str(e)}
+            self.wfile.write(json.dumps(response).encode('utf-8'))
+
+    def do_OPTIONS(self):
+        """处理OPTIONS请求（CORS预检）"""
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        """禁用访问日志"""
+        pass
+
+def wait_for_photo_result(timeout=10):
+    """等待拍照结果"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        with data_store.lock:
+            if data_store.photo_result:
+                result = data_store.photo_result
+                data_store.photo_result = None  # 清空结果
+                return result
+        time.sleep(0.1)
+    return None
+
+def on_mqtt_connect(client, userdata, flags, rc):
+    """MQTT连接回调"""
+    if rc == 0:
+        print(f"[*] MQTT connection successful")
+        data_store.mqtt_connected = True
+        # 订阅所有相关主题
+        client.subscribe(MQTT_TOPIC_DATA)
+        client.subscribe(MQTT_TOPIC_PHOTO_RESULT)
+        client.subscribe(MQTT_TOPIC_PREDICTION)
+        print(f"[*] MQTT topics subscribed")
+    else:
+        print(f"[!] MQTT connection failed: {rc}")
+        data_store.mqtt_connected = False
+
+def on_mqtt_disconnect(client, userdata, rc):
+    """MQTT断开连接回调"""
+    print(f"[!] MQTT连接断开: {rc}")
+    data_store.mqtt_connected = False
+
+def on_mqtt_message(client, userdata, msg):
+    """MQTT消息回调"""
+    try:
+        topic = msg.topic
+        payload = msg.payload.decode('utf-8')
+        
+        if topic == MQTT_TOPIC_DATA:
+            # 传感器数据
+            sensor_data = json.loads(payload)
+            with data_store.lock:
+                data_store.sensor_data.update(sensor_data)
+                data_store.sensor_data['timestamp'] = datetime.now().isoformat()
+            print(f"[*] Received sensor data: Front={sensor_data.get('distance_front', 0)}cm, Left={sensor_data.get('distance_left', 0)}cm, Right={sensor_data.get('distance_right', 0)}cm")
+        
+        elif topic == MQTT_TOPIC_PHOTO_RESULT:
+            # 拍照结果
+            photo_result = json.loads(payload)
+            with data_store.lock:
+                data_store.photo_result = photo_result
+            print(f"[*] Received photo result: {photo_result.get('status', 'unknown')}")
+        
+        elif topic == MQTT_TOPIC_PREDICTION:
+            # 预测结果
+            prediction_result = json.loads(payload)
+            current_time = time.time()
+            
+            with data_store.lock:
+                # 检查是否是新的预测结果（避免重复处理）
+                if (data_store.prediction_result is None or 
+                    prediction_result.get('timestamp') != data_store.prediction_result.get('timestamp') or
+                    current_time - data_store.last_prediction_time > 2):  # 至少间隔2秒
+                    
+                    data_store.prediction_result = prediction_result
+                    data_store.last_prediction_time = current_time
+                    
+                    # 添加到历史记录
+                    data_store.prediction_history.insert(0, prediction_result)
+                    # 限制历史记录长度
+                    if len(data_store.prediction_history) > 10:
+                        data_store.prediction_history.pop()
+                    
+                    if prediction_result.get('status') == 'success':
+                        class_name = prediction_result.get('prediction', {}).get('class_name', 'unknown')
+                        confidence = prediction_result.get('prediction', {}).get('confidence', 0)
+                        print(f"[*] Received prediction result: {class_name} (Confidence: {confidence:.2f})")
+                    else:
+                        print(f"[!] Prediction failed: {prediction_result.get('message', 'unknown error')}")
+                else:
+                    print(f"[*] Duplicate prediction ignored")
+            
+    except Exception as e:
+        print(f"[!] 处理MQTT消息失败: {e}")
+
+def init_mqtt():
+    """初始化MQTT客户端"""
+    global mqtt_client
+    
+    try:
+        mqtt_client = mqtt.Client()
+        mqtt_client.on_connect = on_mqtt_connect
+        mqtt_client.on_disconnect = on_mqtt_disconnect
+        mqtt_client.on_message = on_mqtt_message
+        
+        # 设置认证
+        if MQTT_USERNAME and MQTT_PASSWORD:
+            mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+        
+        # 连接到MQTT服务器
+        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+        mqtt_client.loop_start()
+        
+        print(f"[*] MQTT客户端初始化完成，连接到 {MQTT_BROKER}:{MQTT_PORT}")
+        return True
+        
+    except Exception as e:
+        print(f"[!] MQTT初始化失败: {e}")
+        return False
+
+def open_web_control():
+    """自动打开网页控制界面"""
+    try:
+        # 获取脚本所在目录
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        web_control_path = os.path.join(script_dir, 'web_control.html')
+        
+        if os.path.exists(web_control_path):
+            # 使用file://协议打开本地HTML文件
+            file_url = f"file://{web_control_path}"
+            print(f"[*] 正在打开网页控制界面: {file_url}")
+            webbrowser.open(file_url)
+            return True
+        else:
+            print(f"[!] 未找到网页控制文件: {web_control_path}")
+            return False
+    except Exception as e:
+        print(f"[!] 打开网页失败: {e}")
+        return False
+
+def start_http_server():
+    """启动HTTP服务器"""
+    try:
+        server = HTTPServer(('localhost', HTTP_PORT), HTTPHandler)
+        print(f"[*] HTTP服务器启动在 http://localhost:{HTTP_PORT}")
+        print(f"[*] 可用端点:")
+        print(f"    GET  /data - 获取传感器数据")
+        print(f"    GET  /prediction - 获取最新预测结果")
+        print(f"    GET  /prediction_history - 获取预测历史")
+        print(f"    GET  /status - 获取连接状态")
+        print(f"    POST /command - 发送控制命令")
+        print(f"    POST /photo - 拍照")
+        server.serve_forever()
+    except Exception as e:
+        print(f"[!] HTTP服务器启动失败: {e}")
+
+def main():
+    """主函数"""
+    print("[*] Starting local HTTP server...")
+    
+    # 初始化MQTT
+    if not init_mqtt():
+        print("[!] MQTT initialization failed, but HTTP server will still start")
+    
+    # 启动HTTP服务器（在后台线程）
+    server_thread = threading.Thread(target=start_http_server, daemon=True)
+    server_thread.start()
+    
+    # 等待服务器启动
+    time.sleep(2)
+    
+    # 自动打开网页控制界面
+    if open_web_control():
+        print("[*] Web control interface opened")
+    else:
+        print("[!] Please manually open web_control.html file")
+    
+    try:
+        # 保持主线程运行
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[*] Server shutdown")
+    except Exception as e:
+        print(f"[!] 服务器错误: {e}")
+    finally:
+        if mqtt_client:
+            mqtt_client.loop_stop()
+            mqtt_client.disconnect()
+
+if __name__ == "__main__":
+    main()

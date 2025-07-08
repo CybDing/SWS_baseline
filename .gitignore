@@ -163,10 +163,15 @@ mdata_balanced/
 data_rasp/
 cropped_pictures/
 raw_pictures/
+data/
 
 # Model checkpoints
 
 saved_model/
+config/
+model/
+*.tflite
+*.keras
 
 
 # YOLO weights
