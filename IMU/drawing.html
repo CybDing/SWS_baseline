@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en-US">
 <head>
 <meta charset="UTF-8">
-<title>小车轨迹实时显示 (精确控制版)</title>
+<title>Trajectoty Real-time drawing</title>
 <style>
   #canvas {
     border: 1px solid black;
@@ -11,25 +11,23 @@
 </style>
 </head>
 <body>
-<h2>🚗 小车轨迹 (精确控制版)</h2>
-<p>画布将自动缩放。运动逻辑：转向时无位移，直行时无转向。</p>
-<canvas id="canvas" width="800" height="600"></canvas>
+<h2>Drawing the trajectory of the robot car</h2>
+<!-- <p></p> -->
+<canvas id="canvas" width="1000" height="600"></canvas>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
 <script>
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
-// --- 配置选项 ---
 const autoScale = true;
 const fixedScale = 5;
 const padding = 50;
 
-// --- 轨迹数据 ---
-const trajectory = [{ x: 0, y: 0, theta: 0 }]; // 增加theta初始值
+
+const trajectory = [{ x: 0, y: 0, theta: 0 }]; 
 let bounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
-// --- 小车状态 ---
 let lastTime = null;
 let lastEncoderLeft = null, lastEncoderRight = null;
 
@@ -38,45 +36,113 @@ function redrawCanvas() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   let scale;
-  if (autoScale) {
+  if (autoScale && trajectory.length > 1) {
     const trajWidth = bounds.maxX - bounds.minX;
     const trajHeight = bounds.maxY - bounds.minY;
-    const scaleX = (canvas.width - padding * 2) / trajWidth;
-    const scaleY = (canvas.height - padding * 2) / trajHeight;
+    
+    // 确保有最小边界，避免除零错误
+    const minWidth = Math.max(trajWidth, 1);
+    const minHeight = Math.max(trajHeight, 1);
+    
+    const scaleX = (canvas.width - padding * 2) / minWidth;
+    const scaleY = (canvas.height - padding * 2) / minHeight;
     scale = Math.min(scaleX, scaleY);
-    if (!isFinite(scale)) {
-        scale = fixedScale;
-    }
+    
+    // 限制最大和最小缩放比例
+    scale = Math.max(Math.min(scale, 100), 1);
   } else {
     scale = fixedScale;
   }
 
+  // 计算轨迹中心点
   const trajCenterX = (bounds.minX + bounds.maxX) / 2;
   const trajCenterY = (bounds.minY + bounds.maxY) / 2;
-  const offsetX = (canvas.width / 2) - (trajCenterX * scale);
-  const offsetY = (canvas.height / 2) + (trajCenterY * scale);
+  
+  // 计算偏移量，使轨迹在画布中心
+  const offsetX = canvas.width / 2 - trajCenterX * scale;
+  const offsetY = canvas.height / 2 - trajCenterY * scale;
 
+  // 绘制网格线（可选，帮助定位）
+  ctx.strokeStyle = "#e0e0e0";
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.strokeStyle = "blue";
-  ctx.lineWidth = 2;
-
-  trajectory.forEach((point, index) => {
-    const canvasX = point.x * scale + offsetX;
-    const canvasY = canvas.height - (point.y * scale + (offsetY - canvas.height));
-
-    if (index === 0) {
-      ctx.moveTo(canvasX, canvasY);
-    } else {
-      ctx.lineTo(canvasX, canvasY);
-    }
-  });
+  // 绘制中心线
+  ctx.moveTo(canvas.width / 2, 0);
+  ctx.lineTo(canvas.width / 2, canvas.height);
+  ctx.moveTo(0, canvas.height / 2);
+  ctx.lineTo(canvas.width, canvas.height / 2);
   ctx.stroke();
+
+  // 绘制轨迹
+  if (trajectory.length > 1) {
+    ctx.beginPath();
+    ctx.strokeStyle = "blue";
+    ctx.lineWidth = 3;
+
+    trajectory.forEach((point, index) => {
+      const canvasX = point.x * scale + offsetX;
+      const canvasY = canvas.height - (point.y * scale + offsetY);
+
+      if (index === 0) {
+        ctx.moveTo(canvasX, canvasY);
+      } else {
+        ctx.lineTo(canvasX, canvasY);
+      }
+    });
+    ctx.stroke();
+  }
+
+  // Draw start point
+  if (trajectory.length > 0) {
+    const startPoint = trajectory[0];
+    const startX = startPoint.x * scale + offsetX;
+    const startY = canvas.height - (startPoint.y * scale + offsetY);
+    
+    ctx.fillStyle = "green";
+    ctx.beginPath();
+    ctx.arc(startX, startY, 6, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+
+  // Draw current position and direction
+  if (trajectory.length > 1) {
+    const currentPoint = trajectory[trajectory.length - 1];
+    const currentX = currentPoint.x * scale + offsetX;
+    const currentY = canvas.height - (currentPoint.y * scale + offsetY);
+    
+    ctx.fillStyle = "red";
+    ctx.beginPath();
+    ctx.arc(currentX, currentY, 5, 0, 2 * Math.PI);
+    ctx.fill();
+    
+    // Draw direction arrow
+    const arrowLength = 15;
+    const arrowX = currentX + Math.cos(currentPoint.theta) * arrowLength;
+    const arrowY = currentY - Math.sin(currentPoint.theta) * arrowLength;
+    
+    ctx.strokeStyle = "red";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(currentX, currentY);
+    ctx.lineTo(arrowX, arrowY);
+    ctx.stroke();
+  }
+
+
+  if (trajectory.length > 0) {
+    const currentPoint = trajectory[trajectory.length - 1];
+    ctx.fillStyle = "black";
+    ctx.font = "12px Arial";
+    ctx.fillText(`Position: (${currentPoint.x.toFixed(2)}, ${currentPoint.y.toFixed(2)})`, 10, 20);
+    ctx.fillText(`Theta: ${(currentPoint.theta * 180 / Math.PI).toFixed(1)}°`, 10, 35);
+    ctx.fillText(`Scale: ${scale.toFixed(2)}x`, 10, 50);
+    ctx.fillText(`Points: ${trajectory.length}`, 10, 65);
+  }
 }
 
-
 function updateState(data) {
-  // 确保关键数据存在
-  if (data.timestamp === undefined || data.encoder_left === undefined || data.encoder_right === undefined || data.command === undefined) {
+  console.log(data['timestamp'])
+  if (data.timestamp === undefined || data.encoder_left === undefined || data.encoder_right === undefined || data.status === undefined) {
     return;
   }
 
@@ -85,13 +151,17 @@ function updateState(data) {
     lastTime = timestamp;
     lastEncoderLeft = data.encoder_left;
     lastEncoderRight = data.encoder_right;
+    console.log("Initial Timestemp:", lastTime, "Left encoder:", lastEncoderLeft, "Right encoder:", lastEncoderRight);
     return;
   }
 
   const dt = (timestamp - lastTime) / 1000.0;
+  
+  if (dt <= 0){
+   lastTime = timestamp; 
+   return;
+  }
   lastTime = timestamp;
-
-  if (dt <= 0) return;
 
   const deltaEncoderL = data.encoder_left - lastEncoderLeft;
   const deltaEncoderR = data.encoder_right - lastEncoderRight;
@@ -101,57 +171,50 @@ function updateState(data) {
   const lastPoint = trajectory[trajectory.length - 1];
   const currentTheta = lastPoint.theta || 0;
 
-  // --- 核心逻辑：根据指令决定速度和角速度 ---
-  let v = 0;     // 默认线速度为 0
-  let omega = 0; // 默认角速度为 0
+  let omega = 0;
 
-  if (data.command === 'L' || data.command === 'R') {
-    // 转向指令 (L/R): 只改变角度，不产生位移
-    omega = (data.command === 'L' ? data.angular_velocity : -data.angular_velocity) || 0;
-    // v 保持为 0
+  deltadistance = (deltaEncoderL + deltaEncoderR) / 2.0;
 
-  } else if (data.command === 'F' || data.command === 'B') {
-    // 直行/后退指令 (F/B): 只产生位移，不改变角度
-    const deltaDistance = (deltaEncoderL + deltaEncoderR) / 2.0;
-    v = deltaDistance / dt;
-    // omega 保持为 0
+  omega = data.angular_velocity
   
-  }
-  // 对于停止指令 'S', v 和 omega 都将保持为 0，小车完全静止。
-
-  // --- 根据上面计算出的 v 和 omega 更新状态 ---
+  console.log(dt, "s, Delta-EL:", deltaEncoderL, "Delta-ER:",
+   deltaEncoderR,  "omega:", omega.toFixed(2));
+   
   const newTheta = currentTheta + (omega * dt);
-  
-  // 使用平均角度提高位移计算的精度
   const avgTheta = (currentTheta + newTheta) / 2;
-  const newX = lastPoint.x + (v * Math.cos(avgTheta) * dt);
-  const newY = lastPoint.y + (v * Math.sin(avgTheta) * dt);
-  // --- 逻辑结束 ---
-
+  const newX = lastPoint.x + (Math.cos(avgTheta) * deltaEncoderL);
+  const newY = lastPoint.y + (Math.sin(avgTheta) * deltaEncoderR);
+  
+  console.log(`New position: (${newX.toFixed(2)}, ${newY.toFixed(2)}) 角度: ${newTheta.toFixed(2)} (角度)`);
   trajectory.push({ x: newX, y: newY, theta: newTheta });
   
+  // 更新边界
   bounds.minX = Math.min(bounds.minX, newX);
   bounds.maxX = Math.max(bounds.maxX, newX);
   bounds.minY = Math.min(bounds.minY, newY);
   bounds.maxY = Math.max(bounds.maxY, newY);
 
+  // // 保持轨迹数量在合理范围内（可选）
+  // if (trajectory.length > 1000) {
+  //   trajectory.shift(); // 移除最旧的点
+  // }
+
   redrawCanvas();
 }
 
-
-// --- MQTT 连接部分 ---
-const client = new Paho.Client("localhost", 9001, "clientId-" + Math.random());
+const client = new Paho.Client("localhost", 9001, "client-draw-trajectory");
 
 client.onConnectionLost = function (responseObject) {
-  console.error("🔌 连接丢失:", responseObject.errorMessage);
+  console.error("🔌 Connection failed:", responseObject.errorMessage);
 };
 
 client.onMessageArrived = function (message) {
   try {
     const data = JSON.parse(message.payloadString);
+    console.log('📥 Received message:', data);
     updateState(data);
   } catch (e) {
-    console.error("❌ 解析JSON数据出错:", e);
+    console.error("❌ Parsing JSON failed:", e);
   }
 };
 
@@ -159,15 +222,13 @@ client.connect({
   userName: "main",
   password: "sws3009-20",
   onSuccess: () => {
-    console.log(`✅ 已成功连接到 MQTT Broker! 开始订阅 'robot/data' 主题。`);
-    client.subscribe("robot/data");
-  },
+    console.log(`✅ Connected to MQTT Broker! Beginning to subscribe to 'robot/data' topic.`);
+    client.subscribe("robot/data");  },
   onFailure: err => {
-    console.error("❌ 连接失败:", err);
+    console.error("❌ Connection failed:", err);
   }
 });
 
-// 初始绘制
 redrawCanvas();
 </script>
 </body>

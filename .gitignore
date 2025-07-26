@@ -191,3 +191,8 @@ client/
 server/
 image_recognition.py
 
+claude.md
+cat_action_videos/
+cat_video_frames/
+Cats/
+convert.py

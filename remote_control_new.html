@@ -1,0 +1,2927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robotic Car Control Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            /* 60% - Main background (dark) */
+            --bg-primary: #121212;
+            --bg-gradient: linear-gradient(135deg, #121212 0%, #1a1a1a 50%, #0f0f0f 100%);
+            
+            /* 30% - Panel/Card backgrounds */
+            --panel-bg: #1E1E1E;
+            --glass-bg: rgba(30, 30, 30, 0.95);
+            --glass-border: rgba(79, 209, 197, 0.2);
+            
+            /* 10% - Accent color (Modern teal) */
+            --accent-primary: #4FD1C5;
+            --accent-hover: #81E6D9;
+            --accent-pressed: #38B2AC;
+            
+            /* Semantic colors */
+            --success-color: #4ADE80;
+            --warning-color: #FBBF24;
+            --danger-color: #F87171;
+            
+            /* Text colors */
+            --text-primary: #EAEAEA;
+            --text-secondary: #A0A0A0;
+            --text-accent: #1A202C;
+            
+            /* Shadows */
+            --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.4);
+            --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.5);
+            --shadow-accent: 0 8px 20px rgba(79, 209, 197, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg-gradient);
+            min-height: 100vh;
+            overflow-x: hidden;
+            color: var(--text-primary);
+        }
+
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background: var(--bg-gradient);
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-areas: 
+                "header header header"
+                "video controls right-panel"
+                "video-info controls right-panel"
+                "status status status";
+            grid-template-columns: 1.5fr 0.8fr 1.2fr;
+            grid-template-rows: auto minmax(400px, 1fr) auto auto;
+            gap: 20px;
+            padding: 20px;
+            min-height: 100vh;
+            max-width: 1900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            grid-area: header;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 20px;
+            box-shadow: var(--shadow-lg);
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--text-primary);
+            margin-bottom: 10px;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--danger-color);
+        }
+
+        .status-dot.connected {
+            background: var(--success-color);
+        }
+
+        /* Video Section */
+        .video-section {
+            grid-area: video;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 20px;
+            box-shadow: var(--shadow-xl);
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Video Info Section */
+        .video-info-section {
+            grid-area: video-info;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 15px 20px;
+            box-shadow: var(--shadow-lg);
+            align-self: start;
+        }
+
+        .video-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .video-header h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            height: 400px; /* Fixed reasonable height */
+            border-radius: 16px;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        #videoStream {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* Crop sides to fit container nicely */
+        }
+
+        .video-overlay {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            backdrop-filter: blur(10px);
+        }
+
+        .video-controls {
+            position: absolute;
+            bottom: 15px;
+            right: 15px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .video-btn {
+            background: transparent;
+            border: 2px solid var(--text-secondary);
+            color: var(--text-secondary);
+            padding: 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(160, 160, 160, 0.2);
+        }
+
+        .video-btn:hover {
+            background: var(--accent-primary);
+            color: var(--text-accent);
+            border-color: var(--accent-primary);
+            box-shadow: var(--shadow-accent);
+            transform: translateY(-4px) scale(1.05);
+        }
+
+        .video-btn:active {
+            background: var(--accent-pressed);
+            color: var(--text-accent);
+            border-color: var(--accent-pressed);
+            transform: translateY(2px) scale(0.92);
+            box-shadow: 0 2px 8px rgba(56, 178, 172, 0.4);
+        }
+
+        /* Controls Section */
+        .controls-section {
+            grid-area: controls;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 25px;
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+            height: fit-content;
+            align-self: start;
+        }
+
+        .control-group h3 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Direction Controls */
+        .direction-pad {
+            display: grid;
+            grid-template-areas:
+                ". up ."
+                "left stop right"
+                ". down .";
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: 1fr 1fr 1fr;
+            gap: 12px;
+            max-width: 200px;
+            margin: 0 auto;
+        }
+
+        .direction-btn {
+            width: 60px;
+            height: 60px;
+            border: 2px solid var(--text-secondary);
+            border-radius: 16px;
+            font-size: 1.5rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: transparent;
+            color: var(--text-secondary);
+            box-shadow: 0 4px 12px rgba(160, 160, 160, 0.2);
+        }
+
+
+        .direction-btn:hover {
+            background: var(--accent-primary);
+            color: var(--text-accent);
+            border-color: var(--accent-primary);
+            box-shadow: var(--shadow-accent);
+            transform: translateY(-4px) scale(1.05);
+        }
+
+        .direction-btn:active {
+            transform: translateY(2px) scale(0.92);
+            background: var(--accent-pressed);
+            color: var(--text-accent);
+            border-color: var(--accent-pressed);
+            box-shadow: 0 2px 8px rgba(56, 178, 172, 0.4);
+        }
+
+        .direction-btn.active {
+            background: linear-gradient(145deg, #34d399, #10b981);
+            color: white;
+            box-shadow: 0 6px 16px rgba(52, 211, 153, 0.4);
+        }
+
+        .up-btn { grid-area: up; }
+        .left-btn { grid-area: left; }
+        .stop-btn { 
+            grid-area: stop; 
+            background: var(--danger-color) !important;
+            color: white !important;
+            border: 2px solid var(--danger-color) !important;
+            box-shadow: 0 4px 12px rgba(248, 113, 113, 0.3) !important;
+        }
+
+        .stop-btn:hover {
+            background: #FCA5A5 !important;
+            border-color: #FCA5A5 !important;
+            box-shadow: 0 10px 25px rgba(248, 113, 113, 0.6) !important;
+            transform: translateY(-4px) scale(1.05);
+        }
+
+        .stop-btn:active {
+            transform: translateY(2px) scale(0.92);
+            background: #EF4444 !important;
+            border-color: #EF4444 !important;
+            box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4) !important;
+        }
+
+        .stop-btn.active {
+            background: linear-gradient(145deg, #34d399, #10b981);
+            color: white;
+            box-shadow: 0 6px 16px rgba(52, 211, 153, 0.4);
+        }
+        .right-btn { grid-area: right; }
+        .down-btn { grid-area: down; }
+
+        /* Action Buttons */
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .action-btn {
+            padding: 14px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            /* Secondary action style - outlined */
+            background: transparent;
+            color: var(--accent-primary);
+            border: 2px solid var(--accent-primary);
+            box-shadow: 0 4px 12px rgba(79, 209, 197, 0.2);
+        }
+
+        .action-btn:hover {
+            background: var(--accent-primary);
+            color: var(--text-accent);
+            box-shadow: var(--shadow-accent);
+            transform: translateY(-4px) scale(1.02);
+        }
+
+        .action-btn:active {
+            transform: translateY(2px) scale(0.95);
+            background: var(--accent-pressed);
+            color: var(--text-accent);
+            box-shadow: 0 2px 8px rgba(56, 178, 172, 0.4);
+        }
+
+        /* Feed button - consistent with other action buttons */
+        .feed-btn {
+            background: transparent !important;
+            color: var(--accent-primary) !important;
+            border: 2px solid var(--accent-primary) !important;
+            box-shadow: 0 4px 12px rgba(79, 209, 197, 0.2) !important;
+        }
+        
+        .feed-btn:hover {
+            background: var(--accent-primary) !important;
+            color: var(--text-accent) !important;
+            border-color: var(--accent-primary) !important;
+            box-shadow: var(--shadow-accent) !important;
+        }
+        
+        .feed-btn:active {
+            background: var(--accent-pressed) !important;
+            color: var(--text-accent) !important;
+            border-color: var(--accent-pressed) !important;
+        }
+        
+        /* Laser button - same style as all other action buttons */
+        .laser-btn {
+            background: transparent !important;
+            color: var(--accent-primary) !important;
+            border: 2px solid var(--accent-primary) !important;
+            box-shadow: 0 4px 12px rgba(79, 209, 197, 0.2) !important;
+        }
+        
+        .laser-btn:hover {
+            background: var(--accent-primary) !important;
+            color: var(--text-accent) !important;
+            border-color: var(--accent-primary) !important;
+            box-shadow: var(--shadow-accent) !important;
+        }
+        
+        .laser-btn:active {
+            background: var(--accent-pressed) !important;
+            color: var(--text-accent) !important;
+            border-color: var(--accent-pressed) !important;
+        }
+        
+        /* Active states for mode toggles */
+        .action-btn.active, .track-btn.active, .search-btn.active, .auto-btn.active {
+            background: var(--success-color) !important;
+            color: var(--text-accent) !important;
+            border-color: var(--success-color) !important;
+            box-shadow: 0 8px 20px rgba(74, 222, 128, 0.4) !important;
+            transform: translateY(-2px) scale(1.03) !important;
+        }
+        
+        .direction-btn.active, .stop-btn.active {
+            background: var(--success-color) !important;
+            color: var(--text-accent) !important;
+            box-shadow: 0 8px 20px rgba(74, 222, 128, 0.4) !important;
+            transform: translateY(-2px) scale(1.03) !important;
+        }
+
+
+        .right-panel {
+            grid-area: right-panel;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            height: fit-content;
+            align-self: start;
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .robot-status {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .status-display {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .status-item-large {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-icon {
+            font-size: 2rem;
+            color: var(--primary-color);
+        }
+
+        .status-icon.tracking {
+            color: var(--success-color);
+        }
+
+        .status-icon.searching {
+            color: var(--warning-color);
+        }
+
+        .status-text {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .behavior-display {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 15px;
+        }
+
+        .behavior-item {
+            margin-bottom: 10px;
+        }
+
+        .behavior-label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 5px;
+        }
+
+        .behavior-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .behavior-probabilities {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .probability-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            padding: 5px 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+        }
+        
+        .prob-label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        
+        .prob-value {
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        .sidebar-section {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .sidebar-section h3 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* AI Prediction */
+        .prediction-display {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .prediction-value {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--accent-color);
+            margin-bottom: 8px;
+        }
+
+        .confidence-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--success-color), var(--accent-color));
+            transition: width 0.5s ease;
+        }
+
+        .prediction-history {
+            max-height: 200px;
+            overflow-y: auto;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 10px;
+        }
+
+        .history-item {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 0.9rem;
+        }
+
+        .history-item:last-child {
+            border-bottom: none;
+        }
+
+        /* Sensor Data */
+        .sensor-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .sensor-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 12px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .sensor-label {
+            font-size: 0.8rem;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+
+        .sensor-value {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--accent-color);
+        }
+
+        /* Distance Display Styles */
+        .distance-display {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 12px 15px;
+            text-align: center;
+        }
+
+        .distance-main {
+            margin-bottom: 8px;
+        }
+
+        .distance-label {
+            font-size: 0.85rem;
+            opacity: 0.8;
+            margin-bottom: 4px;
+        }
+
+        .distance-value {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--accent-color);
+            margin-bottom: 6px;
+        }
+
+        .distance-status {
+            padding-top: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .status-indicator.normal {
+            color: var(--success-color);
+        }
+
+        .status-indicator.avoiding {
+            color: var(--danger-color);
+        }
+
+        .status-indicator.warning {
+            color: var(--warning-color);
+        }
+
+        /* Status Section */
+        .status-section {
+            grid-area: status;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .instructions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .instruction-group h4 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .key-hint {
+            background: var(--accent-primary);
+            color: var(--text-accent);
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            box-shadow: 0 2px 6px rgba(79, 209, 197, 0.3);
+        }
+
+        /* Notifications */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 2px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 15px 20px;
+            color: var(--text-primary);
+            font-weight: 600;
+            box-shadow: var(--shadow-lg);
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .notification.show {
+            opacity: 1;
+        }
+
+        .notification.success { border-left: 4px solid var(--success-color); }
+        .notification.warning { border-left: 4px solid var(--warning-color); }
+        .notification.error { border-left: 4px solid var(--danger-color); }
+        .notification.info { border-left: 4px solid var(--primary-color); }
+
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            .dashboard {
+                grid-template-areas:
+                    "header"
+                    "video"
+                    "video-info"
+                    "controls"
+                    "right-panel"
+                    "status";
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto auto auto auto auto;
+            }
+
+            .video-container {
+                height: 350px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .status-bar {
+                gap: 15px;
+            }
+
+            .controls-section, .right-panel, .video-info-section {
+                align-self: stretch;
+                height: auto;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .dashboard {
+                padding: 10px;
+                gap: 15px;
+            }
+
+            .video-container {
+                height: 300px;
+            }
+
+            .direction-btn {
+                width: 50px;
+                height: 50px;
+                font-size: 1.2rem;
+            }
+
+            .instructions {
+                flex-direction: column;
+                gap: 20px;
+            }
+
+            .instruction-group {
+                min-width: auto;
+            }
+
+            .right-panel {
+                gap: 10px;
+            }
+
+            .sidebar-section, .video-info-section {
+                padding: 15px;
+            }
+
+            .distance-display {
+                padding: 10px 12px;
+            }
+
+            .distance-value {
+                font-size: 1.4rem;
+            }
+        }
+
+        /* Loading Animation */
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .loading {
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-animation"></div>
+    
+    <div class="dashboard">
+        <!-- Header -->
+        <header class="header">
+            <h1><i class="fas fa-robot"></i> Advanced Robot Control Dashboard</h1>
+            <div class="status-bar">
+                <div class="status-item">
+                    <div class="status-dot" id="mqttStatus"></div>
+                    <span>MQTT</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-dot" id="streamStatus"></div>
+                    <span>Video Stream</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-dot" id="robotStatus"></div>
+                    <span>Robot</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-dot" id="aiStatus"></div>
+                    <span>AI Vision</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Video Section -->
+        <section class="video-section">
+            <div class="video-header">
+                <h2><i class="fas fa-video"></i> Live Camera Feed</h2>
+            </div>
+            <div class="video-container">
+                <img id="videoStream" src="http://127.0.0.1:5200/video_feed" alt="Robot Camera Feed">
+                <div class="video-overlay" id="videoStatus">Connecting...</div>
+                <div class="video-controls">
+                    <button class="video-btn" onclick="toggleFullscreen()">
+                        <i class="fas fa-expand"></i>
+                    </button>
+                    <button class="video-btn" onclick="togglePoseEstimation()">
+                        <i class="fas fa-user"></i>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Video Info Section -->
+        <section class="video-info-section">
+            <h3 style="margin-bottom: 12px; font-size: 1.1rem;"><i class="fas fa-radar"></i> Distance Sensor</h3>
+            <div class="distance-display">
+                <div class="distance-main">
+                    <div class="distance-label">Front Distance</div>
+                    <div class="distance-value" id="distanceFront">-- cm</div>
+                </div>
+                <div class="distance-status">
+                    <div class="status-indicator" id="distanceStatus">
+                        <i class="fas fa-circle"></i>
+                        <span id="distanceStatusText">Normal</span>
+                    </div>
+                </div>
+            </div>
+            <!-- Commented out sensors
+            <div class="sensor-grid" style="display: none;">
+                <div class="sensor-item">
+                    <div class="sensor-label">Angular</div>
+                    <div class="sensor-value" id="angularAccel">-- °/s²</div>
+                </div>
+                <div class="sensor-item">
+                    <div class="sensor-label">Left Enc.</div>
+                    <div class="sensor-value" id="encoderLeft">--</div>
+                </div>
+                <div class="sensor-item">
+                    <div class="sensor-label">Right Enc.</div>
+                    <div class="sensor-value" id="encoderRight">--</div>
+                </div>
+            </div>
+            -->
+        </section>
+
+        <section class="controls-section">
+            <div class="control-group">
+                <h3><i class="fas fa-gamepad"></i> Movement Controls</h3>
+                <div class="direction-pad">
+                    <button class="direction-btn up-btn" data-command="F">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                    <button class="direction-btn left-btn" data-command="L">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <button class="direction-btn stop-btn" data-command="S">
+                        <i class="fas fa-stop"></i>
+                    </button>
+                    <button class="direction-btn right-btn" data-command="R">
+                        <i class="fas fa-arrow-right"></i>
+                    </button>
+                    <button class="direction-btn down-btn" data-command="B">
+                        <i class="fas fa-arrow-down"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3><i class="fas fa-tools"></i> Actions</h3>
+                <div class="action-buttons">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                        <button class="action-btn photo-btn" id="photoBtn">
+                            <i class="fas fa-camera"></i>
+                            Take Photo
+                        </button>
+                        <button class="action-btn laser-btn" id="laserBtn">
+                            <i class="fas fa-dot-circle"></i>
+                            Activate Laser
+                        </button>
+                    </div>
+                    <button class="action-btn feed-btn" id="feedBtn">
+                        <i class="fas fa-bone"></i>
+                        Feed Robot
+                    </button>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                        <button class="action-btn track-btn" id="trackBtn">
+                            <i class="fas fa-crosshairs"></i>
+                            Start Tracking
+                        </button>
+                        <button class="action-btn search-btn" id="searchBtn">
+                            <i class="fas fa-search"></i>
+                            Start Search
+                        </button>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <button class="action-btn move-btn" id="moveBtn">
+                            <i class="fas fa-heart"></i>
+                            Cat Companion
+                        </button>
+                        <button class="action-btn auto-btn" id="autoBtn">
+                            <i class="fas fa-magic"></i>
+                            Smart Auto
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Panel -->
+        <aside class="right-panel">
+            <!-- Robot Mode Status -->
+            <div class="sidebar-section">
+                <h3><i class="fas fa-robot"></i> Robot Mode</h3>
+                <div class="status-display">
+                    <div class="status-item-large">
+                        <div class="status-icon" id="robotModeIcon">
+                            <i class="fas fa-hand-paper"></i>
+                        </div>
+                        <div class="status-text" id="robotModeText">Manual Control</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Action Detection -->
+            <div class="sidebar-section">
+                <h3><i class="fas fa-brain"></i> Cat Behavior Analysis</h3>
+                <div class="behavior-display">
+                    <div class="behavior-item" style="text-align: center;">
+                        <div class="behavior-label">Current Activity:</div>
+                        <div class="behavior-value" id="aiBehavior" style="font-size: 1.3rem; margin-bottom: 8px;">Analyzing...</div>
+                        <div class="behavior-value" id="aiConfidence" style="font-size: 1rem; opacity: 0.8;">0%</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Vision -->
+            <div class="sidebar-section">
+                <h3><i class="fas fa-eye"></i> AI Vision</h3>
+                <div class="prediction-display" id="currentPrediction">
+                    <div class="prediction-value" id="predictionClass">Waiting for analysis...</div>
+                    <div class="confidence-bar">
+                        <div class="confidence-fill" id="confidenceBar" style="width: 0%"></div>
+                    </div>
+                    <div style="font-size: 0.9rem; opacity: 0.8;">
+                        Confidence: <span id="confidenceText">0%</span>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Legacy Cat Behavior (for backward compatibility) -->
+            <div class="sidebar-section" style="display: none;">
+                <h3><i class="fas fa-cat"></i> Cat Behavior</h3>
+                <div class="behavior-display">
+                    <div class="behavior-item">
+                        <div class="behavior-label">Current Activity:</div>
+                        <div class="behavior-value" id="catBehavior">Unknown</div>
+                    </div>
+                    <div class="behavior-history" id="behaviorHistory">
+                        <div class="history-item" style="opacity: 0.6; font-style: italic;">
+                            No behavior detected
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+    <!-- Status Section -->
+    <section class="status-section">
+    <div class="instructions">
+
+        <!-- Keyboard Controls -->
+        <div class="instruction-group">
+        <h4><i class="fas fa-keyboard"></i> Keyboard Controls</h4>
+        <div class="key-controls" style="line-height: 2.2; display: flex; flex-direction: column; gap: 0.5em;">
+            <div>
+            <span class="key-hint">W</span>  Forward &nbsp;&nbsp;
+            <span class="key-hint">S</span>  Backward &nbsp;&nbsp;
+            <span class="key-hint">A</span>  Left &nbsp;&nbsp;
+            <span class="key-hint">D</span>  Right
+            </div>
+            <div>
+            <span class="key-hint">X</span>  Take Photo &nbsp;&nbsp;
+            <span class="key-hint">L</span>  Laser &nbsp;&nbsp;
+            <span class="key-hint">F</span>  Feed &nbsp;&nbsp;
+            <span class="key-hint">T</span>  Track
+            </div>
+            <div>
+            <span class="key-hint">R</span>  Search &nbsp;&nbsp;
+            <span class="key-hint">M</span>  Cat Companion &nbsp;&nbsp;
+            <span class="key-hint">P</span>  Auto
+            </div>
+        </div>
+        </div>
+
+        <!-- Features -->
+        <div class="instruction-group">
+        <h4><i class="fas fa-mouse"></i> Features</h4>
+        <ul class="features-list" style="line-height: 1.15; margin-left: 20px;">
+            <li style="margin-bottom: 2px;">Real-time video streaming with AI vision</li>
+            <li style="margin-bottom: 2px;">AI-powered cat detection and behavior analysis</li>
+            <li style="margin-bottom: 2px;">Intelligent tracking with smart search patterns</li>
+            <li style="margin-bottom: 2px;">Smart Auto mode with adaptive behavior</li>
+            <li style="margin-bottom: 2px;">Live sensor monitoring and data display</li>
+            <li style="margin-bottom: 2px;">Manual and automatic control modes</li>
+        </ul>
+        </div>
+
+        <!-- Safety -->
+        <div class="instruction-group">
+        <h4><i class="fas fa-shield-alt"></i> Safety</h4>
+        <ul class="safety-list" style="line-height: 1.15; margin-left: 20px;">
+            <li style="margin-bottom: 2px;">Automatic collision avoidance with distance sensors</li>
+            <li style="margin-bottom: 2px;">Real-time connection status monitoring</li>
+            <li style="margin-bottom: 2px;">Smart timeout protection and recovery</li>
+            <li style="margin-bottom: 2px;">Emergency stop functionality</li>
+        </ul>
+        </div>
+
+    </div>
+    </section>
+
+
+    <script>
+        const MQTT_BROKER = "localhost";
+        const MQTT_PORT = 9001;
+        const MQTT_TOPIC_COMMAND = "robot/command";
+        const MQTT_TOPIC_DATA = "robot/data";
+        const MQTT_TOPIC_PHOTO = "robot/photo";
+        const MQTT_TOPIC_PHOTO_RESULT = "robot/photo_result";
+        const MQTT_TOPIC_PREDICTION = "robot/prediction";
+        const MQTT_TOPIC_FEED = "robot/feed";
+        const MQTT_TOPIC_OBJECT = "robot/object-detection";
+        const MQTT_TOPIC_PET_STATUS = "robot/pet-status";
+        const MQTT_TOPIC_TRACK_COMMAND = "robot/command";
+        const MQTT_TOPIC_LASER = "robot/laser";
+        const MQTT_TOPIC_BEHAVIOR = "robot/behavior";
+        const MQTT_TOPIC_MOVE = "robot/move";
+        const MQTT_USERNAME = 'main';
+        const MQTT_PASSWORD = 'sws3009-20';
+
+        // Global Variables
+        let mqttClient = null;
+        let currentCommand = 'S';
+        let keyPressed = {};
+        let commandHistory = [];
+        let predictionHistory = [];
+        let commandInterval = null;
+        let isCommandActive = false;
+        let poseEstimationEnabled = false;
+        
+        // Tracking Variables
+        let isTrackingMode = false;
+        let isSearchMode = false;
+        let isAutoMode = false;
+        let lastCatPosition = null;
+        let trackingTimeout = null;
+        let behaviorHistory = [];
+        let robotMode = 'manual';
+        
+        // Move/Companion mode variables
+        let moveTimeout = null;
+        const MOVE_MODE_TIMEOUT = 5000; // Auto-revert to manual after 5 seconds (adjust based on Arduino actuation speed) 
+        
+        let currentBehavior = 'unknown';
+        let behaviorConfidence = 0.0;
+        let behaviorTimestamp = null;
+        let behaviorProbabilities = {};
+        const TRACKING_TIMEOUT = 1500; 
+        const CENTER_X = 360;  // 720/2 = 360
+        const CENTER_Y = 540;  // 1080/2 = 540
+        const DEAD_ZONE = 80; 
+        
+        // Enhanced tracking state management
+        let lastTrackingCommand = 'S';
+        let lastCatDirection = null; 
+        let catLostCount = 0;
+        let currentDistanceFront = 100;
+        let hasTrackedSuccessfully = false;
+        let trackingHistory = []; // Store recent tracking commands
+        
+        // Improved movement control - COMMENTED OUT
+        // let isMovingStep = false;
+        // let stepTimeout = null;
+        // let smoothingTimeout = null;
+        // const STEP_DURATION = 150; // Reduced duration for smoother tracking
+        // const TURN_DURATION = 100; // Faster turns
+        // const STEP_PAUSE = 200; // Longer pause for better recognition
+        // const FORWARD_STEP_DURATION = 100; // Short forward movements
+        // const FORWARD_STEP_PAUSE = 300; // Longer pause after forward movement
+        
+        // Simple position tracking (car movement causes apparent cat movement)
+        let lastProcessedPosition = { x: -999, y: -999 };
+        const MIN_POSITION_CHANGE = 20; // Larger threshold since car movement affects detection
+        
+        // Enhanced search system
+        let isSearchTurning = false;
+        let searchTurnTimeout = null;
+        let searchDirection = 'L'; // Remember search direction
+        const SEARCH_TURN_DURATION = 70; // Very quick search turns
+        const SEARCH_TURN_PAUSE = 200; // Shorter pause for faster detection
+        
+        // Pulse-based tracking constants
+        const TURN_PULSE_DURATION = 110; // Short pulse duration for turns
+        const FORWARD_PULSE_DURATION = 150; // Short pulse duration for forward movement
+        let turnPulseTimeout = null;
+        let forwardPulseTimeout = null;
+        
+        // Cat detection tracking for behavior validation
+        let lastCatDetectionTime = 0;
+        let isCatCurrentlyDetected = false;
+        const CAT_DETECTION_TIMEOUT = 2000; // 2 seconds without detection = no cat
+        
+        // Detection filtering variables (need to be defined)
+        let consecutiveCatDetections = 0;
+        let consecutiveLostDetections = 0;
+        let distinctCatDetections = 0; // Track distinct cat detections
+        let validCatDetections = 0; // Track valid cat detections for final decision
+        const CAT_DETECTION_THRESHOLD = 1; // Stop immediately on 1 detection
+        const CAT_LOST_THRESHOLD = 1; // Reduced for faster response
+        const MIN_CONFIDENCE_THRESHOLD = 0.5;
+        const MAX_DISTINCT_DETECTIONS = 5; // Stop after 5 distinct detections
+        const CAT_TRACKING_VALIDATION_THRESHOLD = 3; // Need 3 detections to enter tracking mode
+        
+        // Automatic mode variables
+        let autoModeState = 'searching'; // 'searching', 'tracking', 'lost'
+        let autoSearchTimeout = null;
+        let autoLostTimeout = null;
+        let catFoundInAuto = false;
+        const AUTO_SEARCH_SPEED_INTERVAL = 100; // Slower movement for search
+        const AUTO_LOST_TIMEOUT = 3000; // Time before returning to search
+        const AUTO_SEARCH_TURN_DURATION = 200; // Slower turns for search
+
+        // Cat Detection Validation Functions
+        function checkIfCatIsDetected() {
+            const now = Date.now();
+            const timeSinceLastDetection = now - lastCatDetectionTime;
+            
+            // Only use object detection - no AI prediction dependency
+            return timeSinceLastDetection < CAT_DETECTION_TIMEOUT;
+        }
+        
+        function updateCatDetectionStatus(isDetected) {
+            if (isDetected) {
+                lastCatDetectionTime = Date.now();
+                isCatCurrentlyDetected = true;
+            } else {
+                // Only update status if timeout has passed
+                const now = Date.now();
+                if (now - lastCatDetectionTime > CAT_DETECTION_TIMEOUT) {
+                    isCatCurrentlyDetected = false;
+                }
+            }
+        }
+
+        // Initialize Application
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log("Initializing Robot Control Dashboard...");
+            initMQTT();
+            setupEventListeners();
+            setupVideoStream();
+        });
+
+        function initMQTT() {
+            try {
+                mqttClient = new Paho.MQTT.Client(MQTT_BROKER, MQTT_PORT, "robot_dashboard_" + Date.now());
+                mqttClient.onConnectionLost = onConnectionLost;
+                mqttClient.onMessageArrived = onMessageArrived;
+                
+                mqttClient.connect({
+                    onSuccess: onConnect,
+                    onFailure: onConnectFailure,
+                    useSSL: false,
+                    userName: MQTT_USERNAME,
+                    password: MQTT_PASSWORD,
+                });
+            } catch (error) {
+                console.error("❌ MQTT initialization failed:", error);
+                updateStatus('mqttStatus', false);
+            }
+        }
+
+        function onConnect() {
+            console.log("✅ MQTT connected successfully");
+            updateStatus('mqttStatus', true);
+            
+            // Subscribe to topics
+            mqttClient.subscribe(MQTT_TOPIC_DATA);
+            mqttClient.subscribe(MQTT_TOPIC_PHOTO_RESULT);
+            mqttClient.subscribe(MQTT_TOPIC_PREDICTION);
+            mqttClient.subscribe(MQTT_TOPIC_OBJECT);
+            mqttClient.subscribe(MQTT_TOPIC_PET_STATUS);
+            mqttClient.subscribe(MQTT_TOPIC_BEHAVIOR);
+            
+            showNotification('MQTT Connected', 'success');
+        }
+
+        function onConnectFailure(error) {
+            console.error("❌ MQTT connection failed:", error);
+            updateStatus('mqttStatus', false);
+            showNotification('MQTT Connection Failed', 'error');
+        }
+
+        function onConnectionLost(responseObject) {
+            if (responseObject.errorCode !== 0) {
+                console.error("❌ MQTT connection lost:", responseObject.errorMessage);
+                updateStatus('mqttStatus', false);
+                showNotification('MQTT Connection Lost', 'warning');
+            }
+        }
+
+        function onMessageArrived(message) {
+            const topic = message.destinationName;
+            const payload = message.payloadString;
+            
+            try {
+                const data = JSON.parse(payload);
+                
+                switch (topic) {
+                    case MQTT_TOPIC_DATA:
+                        updateSensorData(data);
+                        break;
+                    case MQTT_TOPIC_PHOTO_RESULT:
+                        handlePhotoResult(data);
+                        break;
+                    case MQTT_TOPIC_PREDICTION:
+                        handlePredictionResult(data);
+                        break;
+                    case MQTT_TOPIC_OBJECT:
+                        handleCatPosition(data);
+                        break;
+                    case MQTT_TOPIC_PET_STATUS:
+                        handlePetBehavior(data);
+                        break;
+                    case MQTT_TOPIC_BEHAVIOR:
+                        handleBehaviorAnalysis(data);
+                        break;
+                }
+            } catch (error) {
+                console.error(`❌ Failed to parse ${topic} message:`, error);
+            }
+        }
+
+        // Control Functions
+        function sendCommand(command) {
+            if (mqttClient && mqttClient.isConnected()) {
+                const message = new Paho.MQTT.Message(command);
+                message.destinationName = MQTT_TOPIC_COMMAND;
+                mqttClient.send(message);
+                
+                currentCommand = command;
+                updateButtonStates();
+                addCommandToHistory(command);
+            } else {
+                showNotification('MQTT not connected', 'error');
+            }
+        }
+
+        function startContinuousCommand(command, isAutomatic = false) {
+            if (isCommandActive && currentCommand === command) return;
+            
+            // Exit tracking/search/auto mode if manual direction command is given (not automatic)
+            if (!isAutomatic && command !== 'S' && (isTrackingMode || isSearchMode || isAutoMode)) {
+                if (isTrackingMode) {
+                    toggleTracking();
+                }
+                if (isSearchMode) {
+                    toggleSearch();
+                }
+                if (isAutoMode) {
+                    toggleAutoMode();
+                }
+                // Clear move timeout if switching to manual control
+                if (moveTimeout) {
+                    clearTimeout(moveTimeout);
+                    moveTimeout = null;
+                    updateRobotMode('manual');
+                }
+                showNotification('Switched to manual control', 'info');
+            }
+            
+            stopContinuousCommand();
+            isCommandActive = true;
+            currentCommand = command;
+            
+            sendCommand(command);
+            
+            // Improved command intervals for different modes
+            let interval;
+            if (isAutomatic) {
+                if (isAutoMode && autoModeState === 'searching') {
+                    // Slower movements during auto search
+                    interval = AUTO_SEARCH_SPEED_INTERVAL;
+                } else {
+                    // Fast automatic tracking speed - shorter for turning
+                    if (command === 'L' || command === 'R') {
+                        interval = 30; // Faster turning for better tracking
+                    } else {
+                        interval = 50; // Normal speed for forward/backward
+                    }
+                }
+            } else {
+                // Fast manual control - shorter for turning
+                if (command === 'L' || command === 'R') {
+                    interval = 30; // Faster turning for better responsiveness
+                } else {
+                    interval = 50; // Normal speed for forward/backward
+                }
+            }
+                
+            commandInterval = setInterval(() => {
+                if (isCommandActive) sendCommand(command);
+            }, interval);
+        }
+
+        function stopContinuousCommand() {
+            if (commandInterval) {
+                clearInterval(commandInterval);
+                commandInterval = null;
+            }
+            
+            if (isCommandActive) {
+                isCommandActive = false;
+                sendCommand('S');
+                updateButtonStates();
+            }
+        }
+
+        // Action Functions
+        function takePhoto() {
+            console.log("📸 Taking photo...");
+            showNotification('Taking Photo...', 'info');
+            
+            if (mqttClient && mqttClient.isConnected()) {
+                const message = new Paho.MQTT.Message("take");
+                message.destinationName = MQTT_TOPIC_PHOTO;
+                mqttClient.send(message);
+            } else {
+                showNotification('MQTT not connected', 'error');
+            }
+        }
+
+        function feedRobot() {
+            console.log("🍖 Feeding robot...");
+            showNotification('Feeding Robot...', 'info');
+            
+            if (mqttClient && mqttClient.isConnected()) {
+                const message = new Paho.MQTT.Message("feed");
+                message.destinationName = MQTT_TOPIC_FEED;
+                mqttClient.send(message);
+            } else {
+                showNotification('MQTT not connected', 'error');
+            }
+        }
+
+        function activateLaser() {
+            console.log("🔴 Activating laser...");
+            showNotification('Laser Activated!', 'warning');
+            
+            if (mqttClient && mqttClient.isConnected()) {
+                const message = new Paho.MQTT.Message("laser");
+                message.destinationName = MQTT_TOPIC_LASER;
+                mqttClient.send(message);
+            } else {
+                showNotification('MQTT not connected', 'error');
+            }
+        }
+
+        function triggerMoveAction() {
+            console.log('🐱 Move/Companion button clicked');
+            
+            // Exit all other automatic states first
+            if (isTrackingMode) {
+                toggleTracking();
+            }
+            if (isSearchMode) {
+                toggleSearch();
+            }
+            if (isAutoMode) {
+                toggleAutoMode();
+            }
+            
+            // Stop any active movement commands
+            stopContinuousCommand();
+            
+            // Update button appearance to show active state
+            const moveBtn = document.getElementById('moveBtn');
+            moveBtn.innerHTML = '<i class="fas fa-heart"></i> Playing...';
+            moveBtn.classList.add('active');
+            moveBtn.style.background = 'linear-gradient(145deg, #34d399, #10b981)';
+            moveBtn.style.boxShadow = '0 6px 16px rgba(52, 211, 153, 0.4)';
+            
+            // Send single M command immediately
+            sendMoveCommand();
+            
+            // Temporarily show "Cat Playing" state
+            updateRobotMode('companion');
+            showNotification('🐱 Cat companion action triggered!', 'success');
+            console.log('✅ Move action triggered - will revert to manual');
+            
+            // Set timeout to revert back to manual state
+            // Clear any existing timeout first
+            if (moveTimeout) {
+                clearTimeout(moveTimeout);
+            }
+            
+            moveTimeout = setTimeout(() => {
+                // Reset button appearance
+                moveBtn.innerHTML = '<i class="fas fa-heart"></i> Cat Companion';
+                moveBtn.classList.remove('active');
+                moveBtn.style.background = '';
+                moveBtn.style.boxShadow = '';
+                
+                updateRobotMode('manual');
+                console.log('⏰ Move action completed - reverted to manual');
+            }, MOVE_MODE_TIMEOUT);
+        }
+        
+        function sendMoveCommand() {
+            if (mqttClient && mqttClient.isConnected()) {
+                const message = new Paho.MQTT.Message("M");
+                message.destinationName = MQTT_TOPIC_MOVE;
+                mqttClient.send(message);
+                console.log("🔄 Move command sent");
+            } else {
+                showNotification('MQTT not connected', 'error');
+            }
+        }
+
+        function toggleTracking() {
+            console.log('🎯 Tracking button clicked - Current state:', isTrackingMode);
+            isTrackingMode = !isTrackingMode;
+            console.log('🎯 New tracking state:', isTrackingMode);
+            const trackBtn = document.getElementById('trackBtn');
+            
+            if (isTrackingMode) {
+                // Disable other modes if active
+                if (isSearchMode) {
+                    toggleSearch();
+                }
+                if (isAutoMode) {
+                    toggleAutoMode();
+                }
+                
+                // Reset tracking variables when starting tracking
+                lastTrackingCommand = 'S';
+                catLostCount = 0;
+                hasTrackedSuccessfully = false;
+                
+                trackBtn.innerHTML = '<i class="fas fa-stop"></i> Stop Tracking';
+                trackBtn.classList.add('active');
+                trackBtn.style.background = 'linear-gradient(145deg, #34d399, #10b981)';
+                trackBtn.style.boxShadow = '0 6px 16px rgba(52, 211, 153, 0.4)';
+                updateRobotMode('tracking');
+                sendTrackCommand('start');
+                showNotification('🎯 Cat tracking activated!', 'success');
+                console.log('✅ Tracking mode enabled');
+            } else {
+                trackBtn.innerHTML = '<i class="fas fa-crosshairs"></i> Start Tracking';
+                trackBtn.classList.remove('active');
+                trackBtn.style.background = '';
+                trackBtn.style.boxShadow = '';
+                
+                // Immediately stop all commands and clear timeouts
+                if (trackingTimeout) {
+                    clearTimeout(trackingTimeout);
+                    trackingTimeout = null;
+                }
+                
+                // Stop any active commands immediately
+                stopContinuousCommand();
+                
+                // Send multiple stop commands to ensure robot stops
+                sendCommand('S');
+                setTimeout(() => sendCommand('S'), 50);
+                setTimeout(() => sendCommand('S'), 100);
+                
+                // Reset tracking variables when stopping tracking
+                lastTrackingCommand = 'S';
+                catLostCount = 0;
+                hasTrackedSuccessfully = false;
+                
+                updateRobotMode('manual');
+                sendTrackCommand('stop');
+                showNotification('⏹️ Cat tracking deactivated', 'info');
+                console.log('❌ Tracking mode disabled');
+            }
+        }
+        const MIN_VALID_CATS_THRESHOLD = 3;
+        function toggleSearch() {
+            isSearchMode = !isSearchMode;
+            const searchBtn = document.getElementById('searchBtn');
+            
+            if (isSearchMode) {
+                // Disable other modes if active
+                if (isTrackingMode) {
+                    toggleTracking();
+                }
+                if (isAutoMode) {
+                    toggleAutoMode();
+                }
+                
+                // Reset detection counters when starting a new search
+                distinctCatDetections = 0;
+                validCatDetections = 0;
+                consecutiveCatDetections = 0;
+                consecutiveLostDetections = 0;
+                
+                searchBtn.innerHTML = '<i class="fas fa-stop"></i> Stop Search';
+                searchBtn.classList.add('active');
+                updateRobotMode('searching');
+                showNotification('Cat search activated!', 'success');
+                startSearchPattern();
+            } else {
+                searchBtn.innerHTML = '<i class="fas fa-search"></i> Start Search';
+                searchBtn.classList.remove('active');
+                stopSearchPattern();
+                updateRobotMode('manual');
+                showNotification('Cat search deactivated', 'info');
+            }
+        }
+
+        function startSearchPattern() {
+            // Start continuous forward movement for search mode
+            console.log('🔍 Starting search pattern - continuous forward movement');
+            startContinuousCommand('F', true);
+            showNotification('🔍 Search mode: Moving forward continuously', 'info');
+        }
+
+        function stopSearchPattern() {
+            // Stop continuous forward movement for search mode
+            console.log('⏹️ Stopping search pattern - stopping movement');
+            stopContinuousCommand();
+            showNotification('⏹️ Search mode stopped', 'info');
+        }
+
+        function sendTrackCommand(action) {
+            if (mqttClient && mqttClient.isConnected()) {
+                const message = new Paho.MQTT.Message(action);
+                message.destinationName = MQTT_TOPIC_TRACK_COMMAND;
+                mqttClient.send(message);
+                console.log(`Track command sent: ${action}`);
+            } else {
+                showNotification('MQTT not connected', 'error');
+            }
+        }
+
+        function updateRobotMode(mode) {
+            robotMode = mode;
+            const modeIcon = document.getElementById('robotModeIcon');
+            const modeText = document.getElementById('robotModeText');
+            
+            // Remove all status classes
+            modeIcon.classList.remove('tracking', 'searching');
+            
+            switch(mode) {
+                case 'tracking':
+                    modeIcon.innerHTML = '<i class="fas fa-crosshairs"></i>';
+                    modeIcon.classList.add('tracking');
+                    modeText.textContent = 'Tracking Cat';
+                    break;
+                case 'searching':
+                    modeIcon.innerHTML = '<i class="fas fa-search"></i>';
+                    modeIcon.classList.add('searching');
+                    modeText.textContent = 'Searching for Cat';
+                    break;
+                case 'auto':
+                    modeIcon.innerHTML = '<i class="fas fa-magic"></i>';
+                    modeIcon.classList.add('tracking');
+                    modeText.textContent = `Smart Auto (${autoModeState})`;
+                    break;
+                case 'companion':
+                    modeIcon.innerHTML = '<i class="fas fa-heart"></i>';
+                    modeIcon.classList.add('tracking');
+                    modeText.textContent = 'Cat Companion';
+                    break;
+                default:
+                    modeIcon.innerHTML = '<i class="fas fa-hand-paper"></i>';
+                    modeText.textContent = 'Manual Control';
+            }
+        }
+
+        function handlePetBehavior(data) {
+            const behavior = typeof data === 'string' ? data : data.behavior || data.status || 'Unknown';
+            
+            // Update current behavior display
+            document.getElementById('catBehavior').textContent = behavior;
+            
+            // Add to behavior history
+            const timestamp = new Date().toLocaleTimeString();
+            behaviorHistory.unshift({ behavior, timestamp });
+            
+            // Limit history to 5 items
+            if (behaviorHistory.length > 5) {
+                behaviorHistory.pop();
+            }
+            
+            updateBehaviorHistory();
+            showNotification(`Cat behavior: ${behavior}`, 'info');
+        }
+
+        function handleBehaviorAnalysis(data) {
+            // Update global behavior variables
+            currentBehavior = data.behavior || 'unknown';
+            behaviorConfidence = data.confidence || 0;
+            behaviorTimestamp = data.timestamp || Date.now();
+            
+            // Check if cat is detected before displaying behavior
+            const isCatDetected = data.cat_detected !== undefined ? data.cat_detected : checkIfCatIsDetected();
+            
+            if (!isCatDetected) {
+                // Display N/A when no cat is detected
+                document.getElementById('aiBehavior').textContent = 'N/A';
+                document.getElementById('aiConfidence').textContent = 'N/A';
+                
+                const behaviorElement = document.getElementById('aiBehavior');
+                const confidenceElement = document.getElementById('aiConfidence');
+                behaviorElement.style.color = 'var(--text-secondary)';
+                confidenceElement.style.color = 'var(--text-secondary)';
+                
+                console.log('🚫 No cat detected - behavior display disabled');
+                return;
+            }
+            
+            // Only display behavior when cat is detected
+            document.getElementById('aiBehavior').textContent = currentBehavior.charAt(0).toUpperCase() + currentBehavior.slice(1);
+            document.getElementById('aiConfidence').textContent = `${behaviorConfidence.toFixed(1)}%`;
+            
+            // Change behavior value color based on confidence
+            const behaviorElement = document.getElementById('aiBehavior');
+            const confidenceElement = document.getElementById('aiConfidence');
+            
+            if (behaviorConfidence > 80) {
+                behaviorElement.style.color = 'var(--success-color)';
+                confidenceElement.style.color = 'var(--success-color)';
+            } else if (behaviorConfidence > 60) {
+                behaviorElement.style.color = 'var(--warning-color)';
+                confidenceElement.style.color = 'var(--warning-color)';
+            } else {
+                behaviorElement.style.color = 'var(--danger-color)';
+                confidenceElement.style.color = 'var(--danger-color)';
+            }
+            
+            // Show notification for high-confidence predictions
+            if (behaviorConfidence > 70) {
+                showNotification(`${currentBehavior} (${behaviorConfidence.toFixed(1)}%)`, 'success');
+            }
+            
+            console.log('🧠 Action Detection:', data);
+        }
+
+        function updateBehaviorHistory() {
+            const historyContainer = document.getElementById('behaviorHistory');
+            
+            if (behaviorHistory.length === 0) {
+                historyContainer.innerHTML = '<div class="history-item" style="opacity: 0.6; font-style: italic;">No behavior detected</div>';
+                return;
+            }
+            
+            historyContainer.innerHTML = behaviorHistory.map(item => 
+                `<div class="history-item">
+                    <div><strong>${item.behavior}</strong></div>
+                    <div style="font-size: 0.8rem; opacity: 0.7;">${item.timestamp}</div>
+                </div>`
+            ).join('');
+        }
+
+        // Video Functions
+        function setupVideoStream() {
+            const videoStream = document.getElementById('videoStream');
+            const videoStatus = document.getElementById('videoStatus');
+            let reconnectAttempts = 0;
+            const maxReconnectAttempts = 5;
+            
+            // Add loading state initially
+            videoStatus.textContent = 'Connecting...';
+            updateStatus('streamStatus', false);
+            
+            videoStream.onload = () => {
+                videoStatus.textContent = 'Live • HD';
+                updateStatus('streamStatus', true);
+                reconnectAttempts = 0; // Reset on successful connection
+            };
+            
+            videoStream.onerror = () => {
+                videoStatus.textContent = 'Stream Offline';
+                updateStatus('streamStatus', false);
+                
+                // Auto-retry connection with exponential backoff
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    const retryDelay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+                    videoStatus.textContent = `Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`;
+                    
+                    setTimeout(() => {
+                        if (videoStream.src) {
+                            // Force reload by adding timestamp
+                            const originalSrc = videoStream.src.split('?')[0];
+                            videoStream.src = originalSrc + '?t=' + Date.now();
+                        }
+                    }, retryDelay);
+                } else {
+                    videoStatus.textContent = 'Stream Unavailable';
+                    showNotification('Video stream connection failed', 'error');
+                }
+            };
+            
+            // Handle abort events
+            videoStream.onabort = () => {
+                videoStatus.textContent = 'Connection Aborted';
+                updateStatus('streamStatus', false);
+            };
+        }
+
+        function toggleFullscreen() {
+            const videoContainer = document.querySelector('.video-container');
+            if (!document.fullscreenElement) {
+                videoContainer.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        function togglePoseEstimation() {
+            poseEstimationEnabled = !poseEstimationEnabled;
+            const videoStream = document.getElementById('videoStream');
+            const poseParam = poseEstimationEnabled ? '?pose=true' : '';
+            videoStream.src = `http://127.0.0.1:5200/video_feed${poseParam}`;
+            
+            showNotification(
+                `Pose estimation ${poseEstimationEnabled ? 'enabled' : 'disabled'}`, 
+                'info'
+            );
+        }
+
+        // Data Handlers
+        function updateSensorData(data) {
+            const sensorData = data.sensor_data || data;
+            
+            if (sensorData.distance_front !== undefined) {
+                const frontValue = sensorData.distance_front;
+                currentDistanceFront = frontValue; // Update global distance variable
+                
+                // Update distance display
+                const distanceElement = document.getElementById('distanceFront');
+                const statusElement = document.getElementById('distanceStatus');
+                const statusTextElement = document.getElementById('distanceStatusText');
+                
+                if (frontValue > 0) {
+                    distanceElement.textContent = frontValue + ' cm';
+                    
+                    // Update status based on distance
+                    statusElement.classList.remove('normal', 'warning', 'avoiding');
+                    if (frontValue < 30) {
+                        statusElement.classList.add('avoiding');
+                        statusTextElement.textContent = 'Avoiding';
+                        distanceElement.style.color = 'var(--danger-color)';
+                    } else if (frontValue < 50) {
+                        statusElement.classList.add('warning');
+                        statusTextElement.textContent = 'Caution';
+                        distanceElement.style.color = 'var(--warning-color)';
+                    } else {
+                        statusElement.classList.add('normal');
+                        statusTextElement.textContent = 'Normal';
+                        distanceElement.style.color = 'var(--success-color)';
+                    }
+                } else {
+                    distanceElement.textContent = 'N/A';
+                    statusElement.classList.remove('normal', 'warning', 'avoiding');
+                    statusElement.classList.add('warning');
+                    statusTextElement.textContent = 'No Signal';
+                    distanceElement.style.color = 'var(--text-secondary)';
+                }
+            }
+            
+            
+            if (data.connected_devices) {
+                updateStatus('robotStatus', data.connected_devices.raspberry_pi);
+            } else {
+                updateStatus('robotStatus', true);
+            }
+        }
+
+        function handlePhotoResult(result) {
+            if (result.status === 'success') {
+                showNotification(`📸 Photo saved: ${result.filename}`, 'success');
+            } else {
+                showNotification(`❌ Photo failed: ${result.message}`, 'error');
+            }
+        }
+
+        function handlePredictionResult(prediction) {
+            if (prediction.status === 'success') {
+                updateStatus('aiStatus', true);
+                
+                const predictionClass = document.getElementById('predictionClass');
+                const confidenceBar = document.getElementById('confidenceBar');
+                const confidenceText = document.getElementById('confidenceText');
+                
+                predictionClass.textContent = prediction.prediction.class_name;
+                const confidence = Math.round(prediction.prediction.confidence * 100);
+                confidenceBar.style.width = confidence + '%';
+                confidenceText.textContent = confidence + '%';
+                
+                addPredictionToHistory(prediction);
+                showNotification(
+                    `🎯 Detected: ${prediction.prediction.class_name} (${confidence}%)`,
+                    'success'
+                );
+            } else {
+                updateStatus('aiStatus', false);
+                showNotification('❌ Image classification failed', 'error');
+            }
+        }
+
+        function handleCatPosition(data) {
+            const { x, y, confidence } = data;
+            
+            // Update cat detection status for behavior validation
+            const isCatDetected = x !== -1000 && y !== -1000 && confidence > 0.3;
+            updateCatDetectionStatus(isCatDetected);
+            
+            // Apply noise filtering for more reliable detection
+            const filteredResult = filterCatDetection(x, y, confidence || 0);
+            
+            if (!filteredResult.isValid) {
+                console.log(`🔍 Detection filtered out: ${filteredResult.reason}`);
+                return;
+            }
+            
+            const { filteredX, filteredY, avgConfidence } = filteredResult;
+            
+            // Reset counters when no cat is detected to prevent accumulation
+            if (filteredX === -1000 && filteredY === -1000) {
+                validCatDetections = 0;
+                distinctCatDetections = 0;
+                console.log('🔄 No cat detected - counters reset');
+            }
+            
+            // Handle automatic mode first
+            if (isAutoMode) {
+                if (filteredX !== -1000 && filteredY !== -1000) {
+                    // Cat found in auto mode with confirmation
+                    if (autoModeState === 'searching' && consecutiveCatDetections >= CAT_DETECTION_THRESHOLD) {
+                        console.log(`🪄 AUTO: Cat CONFIRMED! Position: (${filteredX}, ${filteredY}), Avg Confidence: ${avgConfidence.toFixed(2)}`);
+                        
+                        // IMMEDIATE STOP - Stop continuous commands and clear timeouts
+                        stopContinuousCommand();
+                        sendCommand('S');
+                        
+                        // Clear auto search timeout to prevent restarting search
+                        if (autoSearchTimeout) {
+                            clearTimeout(autoSearchTimeout);
+                            autoSearchTimeout = null;
+                        }
+                        
+                        // Increment distinct and valid cat detections for auto mode
+                        distinctCatDetections++;
+                        validCatDetections++;
+                        
+                        // Check if we should continue searching or start tracking
+                        if (validCatDetections < MIN_VALID_CATS_THRESHOLD && distinctCatDetections < MAX_DISTINCT_DETECTIONS) {
+                            console.log(`🪄 AUTO: Cat found but continuing search. Valid cats: ${validCatDetections}/${MIN_VALID_CATS_THRESHOLD}, Distinct detections: ${distinctCatDetections}/${MAX_DISTINCT_DETECTIONS}`);
+                            showNotification(`🎯 Cat ${validCatDetections} found! Auto continuing search...`, 'info');
+                            
+                            // Continue auto searching after a brief pause, but only if no cat is currently detected
+                            setTimeout(() => {
+                                if (isAutoMode && consecutiveCatDetections === 0) {
+                                    startAutoSearch();
+                                } else if (isAutoMode) {
+                                    console.log('🔄 AUTO: Cat still detected during validation, waiting...');
+                                    // Check again after another pause
+                                    setTimeout(() => {
+                                        if (isAutoMode && consecutiveCatDetections === 0) {
+                                            startAutoSearch();
+                                        }
+                                    }, 2000);
+                                }
+                            }, 1000);
+                        } else {
+                            // Start tracking - we have enough cats or reached max detections
+                            if (validCatDetections >= MIN_VALID_CATS_THRESHOLD) {
+                                showNotification(`🎯 Found ${validCatDetections} cats! Auto tracking started.`, 'success');
+                            } else {
+                                showNotification(`🎯 Reached ${distinctCatDetections} detections. Auto tracking started.`, 'warning');
+                            }
+                            
+                            startAutoTracking();
+                        }
+                    }
+                    // Stay in validation mode - don't immediately switch to tracking
+                    // Let the object detection continue validating while robot stays still
+                    // The 'S' command has already been sent above, so robot will stay still
+                    // Only switch to tracking after proper validation is completed in the logic above
+                } else {
+                    // Cat lost in auto mode with confirmation
+                    if (autoModeState === 'tracking' && catFoundInAuto && consecutiveLostDetections >= CAT_LOST_THRESHOLD) {
+                        console.log('🪄 AUTO: Cat CONFIRMED lost during tracking');
+                        handleAutoLostCat();
+                        return;
+                    }
+                }
+            }
+            
+            // Check if in search mode and cat is found with confirmation
+            if (isSearchMode && filteredX !== -1000 && filteredY !== -1000 && consecutiveCatDetections >= CAT_DETECTION_THRESHOLD) {
+                console.log(`CAT CONFIRMED during search! Position: (${filteredX}, ${filteredY}), Avg Confidence: ${avgConfidence.toFixed(2)}`);
+                
+                // IMMEDIATE STOP - Stop continuous commands and clear timeouts
+                stopContinuousCommand();
+                sendCommand('S');
+                
+                // Increment distinct and valid cat detections
+                distinctCatDetections++;
+                validCatDetections++;
+                
+                // Check if we should continue searching or stop
+                if (validCatDetections < MIN_VALID_CATS_THRESHOLD && distinctCatDetections < MAX_DISTINCT_DETECTIONS) {
+                    console.log(`Cat found but continuing search. Valid cats: ${validCatDetections}/${MIN_VALID_CATS_THRESHOLD}, Distinct detections: ${distinctCatDetections}/${MAX_DISTINCT_DETECTIONS}`);
+                    showNotification(`Cat ${validCatDetections} found! Continuing search...`, 'info');
+                    
+                    // Continue searching after a brief pause, but only if no cat is currently detected
+                    setTimeout(() => {
+                        if (isSearchMode && consecutiveCatDetections === 0) {
+                            startSearchPattern();
+                        } else if (isSearchMode) {
+                            console.log('🔄 SEARCH: Cat still detected during validation, waiting...');
+                            // Check again after another pause
+                            setTimeout(() => {
+                                if (isSearchMode && consecutiveCatDetections === 0) {
+                                    startSearchPattern();
+                                }
+                            }, 2000);
+                        }
+                    }, 1000);
+                } else {
+                    // Stop search mode - we have enough cats or reached max detections
+                    toggleSearch();
+                    
+                    if (validCatDetections >= MIN_VALID_CATS_THRESHOLD) {
+                        showNotification(`Found ${validCatDetections} cats! Search completed.`, 'success');
+                    } else {
+                        showNotification(`Reached ${distinctCatDetections} detections. Search completed.`, 'warning');
+                    }
+                    
+                    // Show popup notification
+                    showCatFoundPopup(filteredX, filteredY, avgConfidence);
+                    
+                    // Reset counters for next search
+                    distinctCatDetections = 0;
+                    validCatDetections = 0;
+                }
+                return;
+            }
+            
+            // Check if we should process tracking (manual tracking or auto mode)
+            if (!isTrackingMode && !isAutoMode) {
+                return;
+            }
+            
+            // In auto mode, only process if we're in tracking state and detection is confirmed
+            // Block tracking commands during validation phase (when in searching mode but cat is detected)
+            if (isAutoMode && autoModeState === 'searching') {
+                return; // Stay stopped during validation, don't send tracking commands
+            }
+            if (isAutoMode && (autoModeState !== 'tracking' || consecutiveCatDetections < CAT_DETECTION_THRESHOLD)) {
+                return;
+            }
+            
+            // For manual tracking mode, also require confirmation for stability
+            if (isTrackingMode && !isAutoMode && consecutiveCatDetections < CAT_DETECTION_THRESHOLD && filteredX !== -1000) {
+                console.log(`🎯 Manual tracking: Waiting for detection confirmation (${consecutiveCatDetections}/${CAT_DETECTION_THRESHOLD})`);
+                return;
+            }
+            
+            console.log(`🎯 Filtered cat position: x=${filteredX}, y=${filteredY}, confidence=${avgConfidence.toFixed(2)}, trackingMode=${isTrackingMode}`);
+            
+            // Check for significant position change to prevent unnecessary movements
+            if (filteredX !== -1000 && filteredY !== -1000) { 
+                const deltaX = Math.abs(filteredX - lastProcessedPosition.x);
+                const deltaY = Math.abs(filteredY - lastProcessedPosition.y);
+                const positionChange = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                
+                // if (positionChange < MIN_POSITION_CHANGE) {
+                //     // Only ignore if cat is already reasonably centered
+                //     const catDeltaX = x - CENTER_X;
+                //     const catDeltaY = y - CENTER_Y;
+                //     if (Math.abs(catDeltaX) < DEAD_ZONE && Math.abs(catDeltaY) < DEAD_ZONE) {
+                //         console.log(`📌 Position change too small and cat centered, ignoring`);
+                //         return;
+                //     }
+                //     // If cat is not centered, continue processing despite small movement
+                //     console.log(`📌 Position change small (${positionChange.toFixed(1)}px) but cat not centered, continuing`);
+                // }
+                
+                // Update last processed position
+                lastProcessedPosition = { x, y };
+                console.log(`📈 Significant position change: ${positionChange.toFixed(1)}px`);
+            }
+            
+            // Handle lost cat case with improved logic (only if confirmed lost)
+           
+            if (filteredX === -1000 && filteredY === -1000 && consecutiveLostDetections >= CAT_LOST_THRESHOLD) {
+                console.log('😿 Cat lost from view');
+                catLostCount++;
+                
+                // Intelligent direction maintenance based on cat movement history
+                if (hasTrackedSuccessfully && catLostCount <= 3) {
+                    // Use last known cat direction instead of robot command
+                    let continueDirection = lastCatDirection || lastTrackingCommand;
+                    
+                    // If cat was moving right, continue searching right
+                    if (continueDirection && continueDirection !== 'S') {
+                        console.log(`🔄 Cat lost, continuing search in direction: ${continueDirection} (loss: ${catLostCount})`);
+                        
+                        if (isCommandActive) {
+                            stopContinuousCommand();
+                        }
+                        
+                        // Shorter timeout for lost cat
+                        if (trackingTimeout) clearTimeout(trackingTimeout);
+                        trackingTimeout = setTimeout(() => {
+                            console.log('⏰ Cat search timeout - starting systematic search');
+                            if (catLostCount > 2) {
+                                startIntelligentSearch();
+                            } else {
+                                stopContinuousCommand();
+                                sendCommand('S');
+                            }
+                        }, 400);
+                        
+                        // Continue in the direction cat was last moving
+                        setTimeout(() => {
+                            if (isTrackingMode) {
+                                startContinuousCommand(continueDirection, true);
+                                console.log(`▶️ Continuing in cat direction: ${continueDirection}`);
+                            }
+                        }, 30);
+                        return;
+                    }
+                }
+                
+                // Start intelligent search if cat is lost for first time
+                if (hasTrackedSuccessfully && catLostCount === 1) {
+                    console.log('🔄 First cat loss - starting intelligent search');
+                    startIntelligentSearch();
+                    return;
+                } else if (catLostCount > 3) {
+                    // Stop if lost too many times
+                    console.log('😿 Cat lost too many times - stopping');
+                    if (trackingTimeout) clearTimeout(trackingTimeout);
+                    if (searchTurnTimeout) clearTimeout(searchTurnTimeout);
+                    
+                    stopContinuousCommand();
+                    sendCommand('S');
+                    showNotification('😿 Cat tracking lost', 'warning');
+                    isSearchTurning = false;
+                    return;
+                }
+            }
+            
+            // Clear lost timeout and reset counter since cat is found
+            if (trackingTimeout) {
+                clearTimeout(trackingTimeout);
+                trackingTimeout = null;
+            }
+            
+            // Stop search turning if cat is found
+            if (isSearchTurning) {
+                console.log('🎯 Cat found during search - stopping search turning');
+                if (searchTurnTimeout) clearTimeout(searchTurnTimeout);
+                isSearchTurning = false;
+                stopContinuousCommand();
+            }
+            
+            catLostCount = 0; // Reset loss counter
+            hasTrackedSuccessfully = true; // Mark that we've successfully found and tracked a cat
+            
+            // Check if cat is lost (filteredX/Y = -1000) - start intelligent search immediately
+            if (filteredX === -1000 && filteredY === -1000) {
+                console.log(`😿 Cat is lost (${filteredX}, ${filteredY}) - starting intelligent search`);
+                catLostCount++;
+                
+                // Start intelligent search immediately
+                if (catLostCount === 1) {
+                    console.log('🔄 First cat loss - starting intelligent search');
+                    startIntelligentSearch();
+                }
+                return;
+            }
+            
+            // Update position and calculate new command only if cat is detected
+            lastCatPosition = { x: filteredX, y: filteredY, confidence: avgConfidence, timestamp: Date.now() };
+            const newCommand = calculateTrackingCommand(filteredX, filteredY);
+            console.log(`📍 Calculated command: ${newCommand} (last: ${lastTrackingCommand})`);
+            
+            // Calculate cat movement direction based on position change
+            if (lastCatPosition) {
+                const deltaX = filteredX - lastCatPosition.x;
+                if (Math.abs(deltaX) > 10) {
+                    lastCatDirection = deltaX > 0 ? 'R' : 'L';
+                    console.log(`📊 Cat moving direction: ${lastCatDirection}`);
+                }
+            }
+            
+            // Add to tracking history for pattern analysis
+            if (newCommand && newCommand !== 'S') {
+                trackingHistory.push(newCommand);
+                if (trackingHistory.length > 5) {
+                    trackingHistory.shift();
+                }
+            }
+            
+            // COMMENTED OUT - Enhanced movement processing with smoothing
+            // if (isMovingStep) {
+            //     console.log(`⏳ Already moving, skipping command`);
+            //     return;
+            // }
+            
+            // Enhanced movement processing with smoothing
+            // if (newCommand !== 'S' && isTrackingMode) {
+            //     // Check if this is a different command or enough time has passed
+            //     const shouldExecute = !isMovingStep || (newCommand !== lastTrackingCommand);
+            //     
+            //     if (shouldExecute) {
+            //         console.log(`🚶 Starting smooth movement: ${newCommand}`);
+            //         isMovingStep = true;
+            //         
+            //         // Clear any existing timeouts
+            //         if (stepTimeout) clearTimeout(stepTimeout);
+            //         if (smoothingTimeout) clearTimeout(smoothingTimeout);
+            //         
+            //         // Start movement with adaptive duration
+            //         startContinuousCommand(newCommand, true);
+            //         
+            //         // Adaptive duration based on command type and distance
+            //         let duration;
+            //         let pauseDuration;
+            //         if (newCommand === 'L' || newCommand === 'R') {
+            //             // Turning duration based on cat offset
+            //             const deltaX = Math.abs(catX - CENTER_X);
+            //             duration = Math.min(TURN_DURATION + (deltaX / 10), TURN_DURATION * 2);
+            //             pauseDuration = STEP_PAUSE;
+            //         } else if (newCommand === 'F') {
+            //             // Forward movement - shorter duration with longer pause
+            //             duration = FORWARD_STEP_DURATION;
+            //             pauseDuration = FORWARD_STEP_PAUSE;
+            //         } else {
+            //             // Other movements
+            //             duration = STEP_DURATION;
+            //             pauseDuration = STEP_PAUSE;
+            //         }
+            //         
+            //         console.log(`Adaptive duration: ${duration.toFixed(0)}ms for ${newCommand}`);
+            //         
+            //         // Stop after adaptive duration
+            //         stepTimeout = setTimeout(() => {
+            //             console.log(`Movement step complete`);
+            //             stopContinuousCommand();
+            //             
+            //             // Adaptive pause based on movement type
+            //             smoothingTimeout = setTimeout(() => {
+            //                 isMovingStep = false;
+            //                 console.log(`Ready for next movement`);
+            //             }, pauseDuration);
+            //         }, duration);
+            //     } else {
+            //         console.log(`⏳ Movement in progress, queuing command: ${newCommand}`);
+            //     }
+            //     
+            // } else if (newCommand === 'S') {
+            //     console.log(`🛑 Stop command - halting all movement`);
+            //     if (stepTimeout) clearTimeout(stepTimeout);
+            //     if (smoothingTimeout) clearTimeout(smoothingTimeout);
+            //     stopContinuousCommand();
+            //     isMovingStep = false;
+            // }
+            
+            // PULSE-BASED COMMAND EXECUTION - short pulses with stop intervals
+            if (newCommand !== lastTrackingCommand) {
+                console.log(`🎯 Pulse command execution: ${newCommand} (was: ${lastTrackingCommand})`);
+                
+                if (newCommand === 'S') {
+                    console.log(`🛑 Sending STOP command`);
+                    stopContinuousCommand();
+                    lastTrackingCommand = 'S';
+                } else if (newCommand === 'L' || newCommand === 'R') {
+                    // For turning commands, use short pulses to prevent over-turning
+                    console.log(`🔄 Pulse turn: ${newCommand} for ${TURN_PULSE_DURATION}ms`);
+                    
+                    // Clear any existing pulse timeout
+                    if (turnPulseTimeout) {
+                        clearTimeout(turnPulseTimeout);
+                    }
+                    
+                    console.log(`➡️ Sending ${newCommand} command`);
+                    sendCommand(newCommand);
+                    
+                    turnPulseTimeout = setTimeout(() => {
+                        console.log(`⏸️ Turn pulse complete, sending STOP`);
+                        sendCommand('S');
+                        lastTrackingCommand = 'S';
+                        turnPulseTimeout = null;
+                    }, TURN_PULSE_DURATION);
+                } else if (newCommand === 'F' || newCommand === 'B') {
+                    // For forward/backward commands, use short pulses to prevent over-shooting
+                    console.log(`🔄 Pulse forward: ${newCommand} for ${FORWARD_PULSE_DURATION}ms`);
+                    
+                    // Clear any existing pulse timeout
+                    if (forwardPulseTimeout) {
+                        clearTimeout(forwardPulseTimeout);
+                    }
+                    
+                    console.log(`➡️ Sending ${newCommand} command`);
+                    sendCommand(newCommand);
+                    
+                    // Short pulse duration, then stop
+                    forwardPulseTimeout = setTimeout(() => {
+                        console.log(`⏸️ Forward pulse complete, sending STOP`);
+                        sendCommand('S');
+                        // Reset lastTrackingCommand to 'S' so next pulse can be sent
+                        lastTrackingCommand = 'S';
+                        forwardPulseTimeout = null;
+                    }, FORWARD_PULSE_DURATION);
+                } else {
+                    // For other commands, use continuous command
+                    startContinuousCommand(newCommand, true);
+                    // Update lastTrackingCommand AFTER execution (only for non-pulse commands)
+                    lastTrackingCommand = newCommand;
+                }
+            } else {
+                console.log(`🔄 Same command, continuing: ${newCommand}`);
+            }
+        }
+
+        function calculateTrackingCommand(catX, catY) {
+            // Simple tracking without smoothing (cat doesn't move fast, car movement causes apparent movement)
+            const deltaX = catX - CENTER_X;
+            const deltaY = catY - CENTER_Y;
+            
+            console.log(`📐 Delta: X=${deltaX}, Y=${deltaY}, DeadZone=${DEAD_ZONE}, Distance=${currentDistanceFront}cm`);
+            
+            // Check if cat is centered (within dead zone)
+            if (Math.abs(deltaX) < DEAD_ZONE) {
+                console.log('🎯 Cat is centered - checking distance');
+                
+                // If cat is centered, check distance for forward movement
+                if (currentDistanceFront < 35) {
+                    console.log('🛑 Too close to cat, stopping');
+                    return 'S';
+                } else {
+                    console.log('➡️ Cat centered and safe distance, moving forward');
+                    return 'F';
+                }
+            }
+            
+            // Simple horizontal movement
+            if (Math.abs(deltaX) > DEAD_ZONE) {
+                const command = deltaX > 0 ? 'R' : 'L';
+                console.log(`↔️ Horizontal adjustment needed: ${command}`);
+                return command;
+            }
+            
+            console.log('⏹️ Cat position acceptable - stopping');
+            return 'S';
+        }
+
+        // Utility Functions
+        function addPredictionToHistory(prediction) {
+            const isDuplicate = predictionHistory.some(item => 
+                item.timestamp === prediction.timestamp && 
+                item.filename === prediction.filename
+            );
+            
+            if (!isDuplicate) {
+                predictionHistory.unshift(prediction);
+                if (predictionHistory.length > 10) {
+                    predictionHistory.pop();
+                }
+                updatePredictionHistory();
+            }
+        }
+
+        function updatePredictionHistory() {
+            const historyContainer = document.getElementById('predictionHistory');
+            
+            if (predictionHistory.length === 0) {
+                historyContainer.innerHTML = '<div class="history-item" style="opacity: 0.6; font-style: italic;">No predictions yet</div>';
+                return;
+            }
+            
+            historyContainer.innerHTML = predictionHistory.map(item => {
+                const timestamp = new Date(item.timestamp).toLocaleTimeString();
+                const confidence = Math.round(item.prediction.confidence * 100);
+                return `
+                    <div class="history-item">
+                        <div><strong>${item.prediction.class_name}</strong> (${confidence}%)</div>
+                        <div style="font-size: 0.8rem; opacity: 0.7;">${timestamp}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function addCommandToHistory(command) {
+            const timestamp = new Date().toLocaleTimeString();
+            commandHistory.push({ command, timestamp });
+            
+            if (commandHistory.length > 10) {
+                commandHistory.shift();
+            }
+        }
+
+        function updateStatus(elementId, connected) {
+            const element = document.getElementById(elementId);
+            if (element) {
+                if (connected) {
+                    element.classList.add('connected');
+                } else {
+                    element.classList.remove('connected');
+                }
+            }
+        }
+
+        function updateButtonStates() {
+            document.querySelectorAll('.direction-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            if (currentCommand !== 'S') {
+                const activeBtn = document.querySelector(`[data-command="${currentCommand}"]`);
+                if (activeBtn) {
+                    activeBtn.classList.add('active');
+                }
+            }
+        }
+
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => notification.classList.add('show'), 50);
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => document.body.removeChild(notification), 300);
+            }, 2500);
+        }
+
+        function showCatFoundPopup(x, y, confidence) {
+            // Create popup overlay
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.7);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 10000;
+                font-family: 'Inter', sans-serif;
+            `;
+            
+            // Create popup content
+            const popup = document.createElement('div');
+            popup.style.cssText = `
+                background: linear-gradient(135deg, #ddd6fe 0%, #e0e7ff 50%, #dbeafe 100%);
+                border-radius: 24px;
+                padding: 40px;
+                text-align: center;
+                box-shadow: 0 20px 40px rgba(139, 92, 246, 0.3);
+                border: 2px solid rgba(139, 92, 246, 0.3);
+                max-width: 500px;
+                animation: bounceIn 0.6s ease-out;
+            `;
+            
+            popup.innerHTML = `
+                <div style="font-size: 4rem; margin-bottom: 20px;">🎉</div>
+                <h2 style="color: #1e1b4b; margin-bottom: 20px; font-size: 2rem;">CAT FOUND!</h2>
+                <p style="color: #6366f1; font-size: 1.2rem; margin-bottom: 15px;">
+                    <strong>Position:</strong> (${x}, ${y})
+                </p>
+                <p style="color: #6366f1; font-size: 1.2rem; margin-bottom: 30px;">
+                    <strong>Confidence:</strong> ${(confidence * 100).toFixed(1)}%
+                </p>
+                <button onclick="closeCatFoundPopup()" style="
+                    background: linear-gradient(145deg, #34d399, #10b981);
+                    color: white;
+                    border: none;
+                    padding: 15px 30px;
+                    border-radius: 12px;
+                    font-size: 1.1rem;
+                    font-weight: 600;
+                    cursor: pointer;
+                    box-shadow: 0 4px 12px rgba(52, 211, 153, 0.3);
+                    transition: all 0.3s ease;
+                " onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+                    Awesome! 🐱
+                </button>
+            `;
+            
+            overlay.appendChild(popup);
+            document.body.appendChild(overlay);
+            
+            // Add bounce animation
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes bounceIn {
+                    0% { transform: scale(0.3); opacity: 0; }
+                    50% { transform: scale(1.05); }
+                    70% { transform: scale(0.9); }
+                    100% { transform: scale(1); opacity: 1; }
+                }
+            `;
+            document.head.appendChild(style);
+            
+            // Auto-close after 5 seconds
+            setTimeout(() => {
+                if (document.body.contains(overlay)) {
+                    closeCatFoundPopup();
+                }
+            }, 5000);
+            
+            // Store reference for closing
+            window.catFoundOverlay = overlay;
+            
+            // Play success sound notification
+            showNotification('🎉 Cat found! Search completed successfully!', 'success');
+        }
+
+        function closeCatFoundPopup() {
+            if (window.catFoundOverlay && document.body.contains(window.catFoundOverlay)) {
+                document.body.removeChild(window.catFoundOverlay);
+                window.catFoundOverlay = null;
+            }
+        }
+
+        // Event Listeners
+        function setupEventListeners() {
+            // Keyboard Controls
+            document.addEventListener('keydown', (e) => {
+                if (keyPressed[e.key]) return;
+                keyPressed[e.key] = true;
+                
+                const key = e.key.toLowerCase();
+                
+                switch (key) {
+                    case 'x':
+                        takePhoto();
+                        return;
+                    case 'f':
+                        feedRobot();
+                        return;
+                    case 't':
+                        toggleTracking();
+                        return;
+                    case 'r':
+                        toggleSearch();
+                        return;
+                    case 'l':
+                        activateLaser();
+                        return;
+                    case 'm':
+                        triggerMoveAction();
+                        return;
+                    case 'p':
+                        toggleAutoMode();
+                        return;
+                }
+                
+                const command = calculateMultiKeyCommand();
+                if (command) {
+                    startContinuousCommand(command);
+                }
+            });
+            
+            document.addEventListener('keyup', (e) => {
+                keyPressed[e.key] = false;
+                
+                if (['w', 's', 'a', 'd'].includes(e.key.toLowerCase())) {
+                    stopContinuousCommand();
+                }
+            });
+            
+            // Button Controls - Fixed for better responsiveness
+            document.querySelectorAll('.direction-btn').forEach(btn => {
+                btn.addEventListener('mousedown', (e) => {
+                    e.preventDefault(); // Prevent text selection
+                    const command = btn.getAttribute('data-command') || btn.dataset.command;
+                    if (command && command !== 'S') {
+                        startContinuousCommand(command);
+                    } else {
+                        stopContinuousCommand();
+                    }
+                });
+                
+                btn.addEventListener('mouseup', (e) => {
+                    const command = btn.getAttribute('data-command') || btn.dataset.command;
+                    if (command !== 'S') {
+                        stopContinuousCommand();
+                    }
+                });
+                
+                btn.addEventListener('mouseleave', (e) => {
+                    const command = btn.getAttribute('data-command') || btn.dataset.command;
+                    if (command !== 'S') {
+                        stopContinuousCommand();
+                    }
+                });
+                
+                // Add touch support for mobile devices
+                btn.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    const command = btn.getAttribute('data-command') || btn.dataset.command;
+                    if (command && command !== 'S') {
+                        startContinuousCommand(command);
+                    } else {
+                        stopContinuousCommand();
+                    }
+                });
+                
+                btn.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    const command = btn.getAttribute('data-command') || btn.dataset.command;
+                    if (command !== 'S') {
+                        stopContinuousCommand();
+                    }
+                });
+            });
+            
+            // Action Buttons
+            document.getElementById('photoBtn').addEventListener('click', takePhoto);
+            document.getElementById('laserBtn').addEventListener('click', activateLaser);
+            document.getElementById('feedBtn').addEventListener('click', feedRobot);
+            document.getElementById('trackBtn').addEventListener('click', toggleTracking);
+            document.getElementById('searchBtn').addEventListener('click', toggleSearch);
+            document.getElementById('moveBtn').addEventListener('click', triggerMoveAction);
+            document.getElementById('autoBtn').addEventListener('click', toggleAutoMode);
+            
+            // Cleanup
+            window.addEventListener('beforeunload', () => {
+                stopContinuousCommand();
+            });
+        }
+
+        function calculateMultiKeyCommand() {
+            const isW = keyPressed['w'] || keyPressed['W'];
+            const isS = keyPressed['s'] || keyPressed['S'];
+            const isA = keyPressed['a'] || keyPressed['A'];
+            const isD = keyPressed['d'] || keyPressed['D'];
+
+            if (isW && isA) return 'A';  // Forward + Left
+            if (isW && isD) return 'C';  // Forward + Right
+            if (isS && isA) return 'D';  // Backward + Left
+            if (isS && isD) return 'E';  // Backward + Right
+            if (isW) return 'F';         // Forward
+            if (isS) return 'B';         // Backward
+            if (isA) return 'L';         // Left
+            if (isD) return 'R';         // Right
+
+            return null;
+        }
+        
+        function startIntelligentSearch() {
+            if (!isTrackingMode) return;
+            
+            console.log('🔍 Starting intelligent search pattern');
+            isSearchTurning = true;
+            showNotification('🔍 Smart cat search activated...', 'info');
+            
+            // Try opposite direction first when cat is lost
+            let lastKnownDir = lastCatDirection || (trackingHistory.length > 0 ? trackingHistory[trackingHistory.length - 1] : 'L');
+            let searchDir = lastKnownDir === 'L' ? 'R' : lastKnownDir === 'R' ? 'L' : 'L';
+            console.log(`🔄 Starting search in opposite direction: ${searchDir} (was going: ${lastKnownDir})`);
+            let turnCount = 0;
+            const maxTurns = 6; // Reduced for efficiency
+            
+            function performIntelligentTurn() {
+                if (!isTrackingMode || !isSearchTurning || turnCount >= maxTurns) {
+                    console.log('Intelligent search completed');
+                    isSearchTurning = false;
+                    stopContinuousCommand();
+                    showNotification('Search completed, cat not found', 'warning');
+                    return;
+                }
+                
+                console.log(`🔍 Smart search ${turnCount + 1}/${maxTurns}: ${searchDir}`);
+                startContinuousCommand(searchDir, true);
+                
+                searchTurnTimeout = setTimeout(() => {
+                    stopContinuousCommand();
+                    turnCount++;
+                    
+                    // Intelligent direction switching
+                    if (turnCount < 3) {
+                        // First few turns - continue in opposite direction
+                        searchDir = lastKnownDir === 'L' ? 'R' : lastKnownDir === 'R' ? 'L' : 'L';
+                    } else {
+                        // Later turns - try original direction, then alternate
+                        searchDir = searchDir === 'L' ? 'R' : 'L';
+                    }
+                    
+                    setTimeout(() => {
+                        if (isSearchTurning) {
+                            performIntelligentTurn();
+                        }
+                    }, SEARCH_TURN_PAUSE);
+                    
+                }, SEARCH_TURN_DURATION);
+            }
+            
+            // Start the intelligent search pattern
+            performIntelligentTurn();
+        }
+        
+        function toggleAutoMode() {
+            console.log('🪄 Auto mode button clicked - Current state:', isAutoMode);
+            isAutoMode = !isAutoMode;
+            console.log('🪄 New auto mode state:', isAutoMode);
+            const autoBtn = document.getElementById('autoBtn');
+            
+            if (isAutoMode) {
+                if (isTrackingMode) {
+                    toggleTracking();
+                }
+                if (isSearchMode) {
+                    toggleSearch();
+                }
+                
+                autoModeState = 'searching';
+                catFoundInAuto = false;
+                
+                // Reset detection counters when starting auto mode
+                distinctCatDetections = 0;
+                validCatDetections = 0;
+                consecutiveCatDetections = 0;
+                consecutiveLostDetections = 0;
+                
+                autoBtn.innerHTML = '<i class="fas fa-stop"></i> Stop Auto';
+                autoBtn.classList.add('active');
+                updateRobotMode('auto');
+                showNotification('🪄 Smart Auto Mode activated!', 'success');
+                console.log('✅ Auto mode enabled - starting search phase');
+                
+                startAutoSearch();
+            } else {
+                autoBtn.innerHTML = '<i class="fas fa-magic"></i> Smart Auto';
+                autoBtn.classList.remove('active');
+                
+                // Stop all auto mode activities
+                stopAutoMode();
+                
+                updateRobotMode('manual');
+                showNotification('Smart Auto Mode deactivated', 'info');
+                console.log('❌ Auto mode disabled');
+            }
+        }
+
+        function startAutoSearch() {
+            if (!isAutoMode) return;
+            
+            console.log('🔍 Starting auto search phase');
+            autoModeState = 'searching';
+            updateRobotMode('auto');
+            showNotification('🔍 Auto mode: Searching for cat...', 'info');
+            
+            startContinuousCommand('F', true);
+            
+            // Random turning disabled - robot will just move forward continuously
+            // Set search timeout to change direction periodically
+            // autoSearchTimeout = setTimeout(() => {
+            //     if (isAutoMode && autoModeState === 'searching') {
+            //         console.log('🔄 Auto search: Changing direction');
+            //         stopContinuousCommand();
+            //         
+            //         // Turn for a short time
+            //         startContinuousCommand(searchDirection, true);
+            //         
+            //         // schedule forward process after AUTO_SEARCH_TURN_DURATION
+            //         setTimeout(() => {
+            //             if (isAutoMode) {
+            //                 searchDirection = searchDirection === 'L' ? 'R' : 'L';
+            //                 startAutoSearch();
+            //             }
+            //         }, AUTO_SEARCH_TURN_DURATION);
+            //     }
+            // }, 2000); // Search forward for 2 seconds before turning
+        }
+
+        function startAutoTracking() {
+            if (!isAutoMode) return;
+            
+            console.log('🎯 Auto mode: Switching to tracking phase');
+            autoModeState = 'tracking';
+            catFoundInAuto = true;
+            updateRobotMode('auto');
+            showNotification('🎯 Auto mode: Cat found! Tracking...', 'success');
+            
+            if (autoSearchTimeout) {
+                clearTimeout(autoSearchTimeout);
+                autoSearchTimeout = null;
+            }
+        }
+
+        function handleAutoLostCat() {
+            if (!isAutoMode || !catFoundInAuto) return;
+            
+            console.log('😿 Auto mode: Cat lost, starting intelligent recovery');
+            autoModeState = 'lost';
+            updateRobotMode('auto');
+            showNotification('😿 Auto mode: Cat lost, using intelligent search...', 'warning');
+            
+            // Stop current movement
+            stopContinuousCommand();
+            
+            // Use intelligent search first, then fallback to basic search
+            if (hasTrackedSuccessfully) {
+                console.log('🧠 Auto mode: Starting intelligent search based on previous tracking');
+                startIntelligentSearchForAuto();
+            } else {
+                // Wait a moment then return to basic search mode if no tracking history
+                autoLostTimeout = setTimeout(() => {
+                    if (isAutoMode) {
+                        console.log('🔄 Auto mode: No tracking history, returning to basic search');
+                        catFoundInAuto = false;
+                        startAutoSearch();
+                    }
+                }, AUTO_LOST_TIMEOUT);
+            }
+        }
+
+        function stopAutoMode() {
+            // Clear all auto mode timeouts
+            if (autoSearchTimeout) {
+                clearTimeout(autoSearchTimeout);
+                autoSearchTimeout = null;
+            }
+            if (autoLostTimeout) {
+                clearTimeout(autoLostTimeout);
+                autoLostTimeout = null;
+            }
+            
+            // Stop any movement
+            stopContinuousCommand();
+            
+            // Reset auto mode state
+            autoModeState = 'searching';
+            catFoundInAuto = false;
+            
+            console.log('🛑 Auto mode stopped');
+        }
+
+        function filterCatDetection(x, y, confidence) {
+            // Simple detection confirmation without complex smoothing (car movement is the issue, not cat movement)
+            const isCatDetected = x !== -1000 && y !== -1000;
+            
+            if (isCatDetected) {
+                // Reset lost counter
+                consecutiveLostDetections = 0;
+                
+                // Check minimum confidence threshold
+                if (confidence < MIN_CONFIDENCE_THRESHOLD) {
+                    consecutiveCatDetections = 0;
+                    return {
+                        isValid: false,
+                        reason: `Low confidence: ${confidence.toFixed(2)} < ${MIN_CONFIDENCE_THRESHOLD}`
+                    };
+                }
+                
+                // Increment consecutive detections
+                consecutiveCatDetections++;
+                
+                console.log(`🔍 Cat detection: ${consecutiveCatDetections}/${CAT_DETECTION_THRESHOLD} confirmations, confidence: ${confidence.toFixed(3)}`);
+                
+                return {
+                    isValid: true,
+                    filteredX: x, // Use raw position - car movement causes apparent movement, not actual cat movement
+                    filteredY: y,
+                    avgConfidence: confidence,
+                    confirmationLevel: consecutiveCatDetections
+                };
+                
+            } else {
+                // Cat not detected
+                consecutiveCatDetections = 0;
+                consecutiveLostDetections++;
+                
+                console.log(`😿 Cat lost: ${consecutiveLostDetections}/${CAT_LOST_THRESHOLD} confirmations`);
+                
+                return {
+                    isValid: true,
+                    filteredX: -1000,
+                    filteredY: -1000,
+                    avgConfidence: 0,
+                    lostConfirmationLevel: consecutiveLostDetections
+                };
+            }
+        }
+
+        function startSearchTurning() {
+            startIntelligentSearch();
+        }
+        
+        function startIntelligentSearchForAuto() {
+            if (!isAutoMode) return;
+            
+            console.log('🔍 Starting intelligent search pattern for auto mode');
+            isSearchTurning = true;
+            showNotification('🧠 Auto mode: Smart cat search activated...', 'info');
+            
+            // Try opposite direction first when cat is lost in auto mode
+            let lastKnownDir = lastCatDirection || (trackingHistory.length > 0 ? trackingHistory[trackingHistory.length - 1] : 'L');
+            let searchDir = lastKnownDir === 'L' ? 'R' : lastKnownDir === 'R' ? 'L' : 'L';
+            console.log(`🔄 Auto search in opposite direction: ${searchDir} (was going: ${lastKnownDir})`);
+            let turnCount = 0;
+            const maxTurns = 6; // Limited turns for auto mode
+            
+            function performAutoIntelligentTurn() {
+                if (!isAutoMode || !isSearchTurning || turnCount >= maxTurns) {
+                    console.log('Auto intelligent search completed, returning to basic search');
+                    isSearchTurning = false;
+                    stopContinuousCommand();
+                    
+                    // Return to basic auto search after intelligent search fails
+                    catFoundInAuto = false;
+                    startAutoSearch();
+                    return;
+                }
+                
+                console.log(`🔍 Auto smart search ${turnCount + 1}/${maxTurns}: ${searchDir}`);
+                startContinuousCommand(searchDir, true);
+                
+                searchTurnTimeout = setTimeout(() => {
+                    stopContinuousCommand();
+                    turnCount++;
+                    
+                    // Intelligent direction switching
+                    if (turnCount < 3) {
+                        // First few turns - continue in opposite direction
+                        searchDir = lastKnownDir === 'L' ? 'R' : lastKnownDir === 'R' ? 'L' : 'L';
+                    } else {
+                        // Later turns - try original direction, then alternate
+                        searchDir = searchDir === 'L' ? 'R' : 'L';
+                    }
+                    
+                    // Pause to check for cat detection
+                    setTimeout(() => {
+                        if (isSearchTurning && isAutoMode) {
+                            performAutoIntelligentTurn();
+                        }
+                    }, SEARCH_TURN_PAUSE);
+                    
+                }, SEARCH_TURN_DURATION);
+            }
+            
+            // Start the intelligent search pattern for auto mode
+            performAutoIntelligentTurn();
+        }
+    </script>
+</body>
+</html>
